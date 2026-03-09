@@ -1,18 +1,53 @@
 {
   "type": "object",
   "properties": {
-    "run_id": { "type": "string" },
-    "goal": { "type": "string" },
-    "task_type": { "type": "string", "enum": ["objective", "ticker"] },
-    "primary_entity": { "type": "string" },
-    "research_angle": { "type": "string" },
-    "audience": { "type": "string" },
-    "deliverable": { "type": "string", "enum": ["research_answer"] },
-    "objective_statement": { "type": "string" },
+    "run_id": {
+      "type": "string"
+    },
+    "goal": {
+      "type": "string"
+    },
+    "task_type": {
+      "type": "string",
+      "enum": [
+        "objective",
+        "ticker"
+      ]
+    },
+    "primary_entity": {
+      "type": "string"
+    },
+    "research_angle": {
+      "type": "string"
+    },
+    "audience": {
+      "type": "string"
+    },
+    "report_mode": {
+      "type": "string",
+      "enum": [
+        "management_brief",
+        "internal_share"
+      ]
+    },
+    "deliverable": {
+      "type": "string",
+      "enum": [
+        "research_answer"
+      ]
+    },
+    "objective_statement": {
+      "type": "string"
+    },
+    "decision_or_discussion_need": {
+      "type": "string"
+    },
     "success_criteria": {
       "type": "array",
       "minItems": 1,
-      "items": { "type": "string" }
+      "items": {
+        "type": "string"
+      }
     },
     "key_questions": {
       "type": "array",
@@ -21,44 +56,80 @@
       "items": {
         "type": "object",
         "properties": {
-          "id": { "type": "string" },
-          "question": { "type": "string" },
-          "why_it_matters": { "type": "string" },
-          "priority": { "type": "string", "enum": ["high", "medium", "low"] }
+          "id": {
+            "type": "string"
+          },
+          "question": {
+            "type": "string"
+          },
+          "why_it_matters": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "string",
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ]
+          }
         },
-        "required": ["id", "question", "why_it_matters", "priority"],
+        "required": [
+          "id",
+          "question",
+          "why_it_matters",
+          "priority"
+        ],
         "additionalProperties": false
       }
     },
     "comparison_entities": {
       "type": "array",
-      "items": { "type": "string" }
+      "items": {
+        "type": "string"
+      }
     },
     "metrics": {
       "type": "array",
       "items": {
         "type": "object",
         "properties": {
-          "name": { "type": "string" },
-          "definition": { "type": "string" },
-          "reason": { "type": "string" }
+          "name": {
+            "type": "string"
+          },
+          "definition": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
         },
-        "required": ["name", "definition", "reason"],
+        "required": [
+          "name",
+          "definition",
+          "reason"
+        ],
         "additionalProperties": false
       }
     },
     "search_queries": {
       "type": "array",
       "minItems": 3,
-      "items": { "type": "string" }
+      "items": {
+        "type": "string"
+      }
     },
     "out_of_scope": {
       "type": "array",
-      "items": { "type": "string" }
+      "items": {
+        "type": "string"
+      }
     },
     "assumptions_to_test": {
       "type": "array",
-      "items": { "type": "string" }
+      "items": {
+        "type": "string"
+      }
     }
   },
   "required": [
@@ -68,8 +139,10 @@
     "primary_entity",
     "research_angle",
     "audience",
+    "report_mode",
     "deliverable",
     "objective_statement",
+    "decision_or_discussion_need",
     "success_criteria",
     "key_questions",
     "comparison_entities",

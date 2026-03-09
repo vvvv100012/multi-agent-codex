@@ -11,13 +11,16 @@ Inputs:
 Task:
 - Spawn the `synthesizer` sub-agent.
 - Produce a structured final answer that directly addresses the user goal.
-
-Return ONLY valid JSON matching the provided schema.
+- Return ONLY valid JSON matching the provided schema.
 
 Hard rules:
 - Prefer local datasets when they directly answer the user's quantitative question.
+- Use `brief.report_mode` and `brief.audience` as binding constraints.
+- For `management_brief`, prioritize the shortest path to answer -> implication -> risk -> next action.
+- For `internal_share`, prioritize insight -> mechanism -> why it matters -> discussion hooks.
 - Use web evidence mainly for context, implementation details, or validation beyond what local data can show.
 - Directly answer the objective before adding context.
 - Every section must reference relevant evidence ids.
+- `top_takeaways` must be concrete and non-generic.
 - Open gaps must be explicit, not buried in prose.
 - Do not write files; output JSON only.

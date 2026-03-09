@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_ROOT = ROOT / "output"
 LAST_RUN_ID_PATH = OUTPUT_ROOT / ".last_run_id"
 WORKFLOW_CHOICES = ("internal", "external")
+REPORT_MODE_CHOICES = ("auto", "management_brief", "internal_share")
 
 
 def utc_now_iso() -> str:
@@ -118,23 +119,178 @@ def render_template(path: Path, mapping: dict[str, str]) -> str:
     return text
 
 
+def append_jsonl(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
+
+
+def compact_text(text: str, max_len: int = 180) -> str:
+    normalized = normalize_space(text)
+    return normalized if len(normalized) <= max_len else normalized[: max_len - 3] + "..."
+
+
+def format_event_lines(event: dict[str, Any]) -> list[str]:
+    event_type = event.get("type", "event")
+    now = datetime.now().strftime("%H:%M:%S")
+
+    if event_type == "thread.started":
+        return [
+            f"[EVENT {now}] thread.started | run={event.get('thread_id', '')} "
+            f"workflow={event.get('workflow', '')} audience={event.get('audience', '')}"
+        ]
+
+    if event_type == "thread.completed":
+        return [
+            f"[EVENT {now}] thread.completed | run={event.get('thread_id', '')} "
+            f"status={event.get('status', '')} stop_reason={compact_text(str(event.get('stop_reason', '')))}"
+        ]
+
+    if event_type == "turn.started":
+        return [f"[EVENT {now}] turn.started | label={event.get('label', '')} round={event.get('round', '')}"]
+
+    if event_type == "turn.completed":
+        return [f"[EVENT {now}] turn.completed | label={event.get('label', '')} round={event.get('round', '')}"]
+
+    if event_type == "item.started":
+        item = event.get("item", {})
+        item_type = item.get("type", "")
+        if item_type == "todo_list":
+            lines = [f"[EVENT {now}] item.started | todo_list {item.get('id', '')}"]
+            for todo in item.get("items", []):
+                mark = "x" if todo.get("completed") else " "
+                lines.append(f"  [{mark}] {todo.get('text', '')}")
+            return lines
+        if item_type == "stage_execution":
+            return [
+                f"[EVENT {now}] item.started | stage={item.get('stage', '')} "
+                f"schema={item.get('schema', '')} search={item.get('search', False)}"
+            ]
+        return [f"[EVENT {now}] item.started | id={item.get('id', '')} type={item_type}"]
+
+    if event_type == "item.completed":
+        item = event.get("item", {})
+        item_type = item.get("type", "")
+        if item_type == "stage_execution":
+            line = (
+                f"[EVENT {now}] item.completed | stage={item.get('stage', '')} "
+                f"status={item.get('status', '')} duration={item.get('duration_sec', 0):.1f}s "
+                f"schema_pass={item.get('schema_pass', False)}"
+            )
+            if item.get("error"):
+                line += f" error={compact_text(str(item.get('error', '')))}"
+            return [line]
+        return [
+            f"[EVENT {now}] item.completed | id={item.get('id', '')} "
+            f"type={item_type} status={item.get('status', '')}"
+        ]
+
+    if event_type == "metrics.schema":
+        return [
+            f"[METRIC {now}] schema_pass_rate={event.get('pass_rate', '0.0%')} "
+            f"({event.get('passed', 0)}/{event.get('attempts', 0)}) failed={event.get('failed', 0)}"
+        ]
+
+    return [f"[EVENT {now}] {event_type}"]
+
+
+def emit_event(events_path: Path, event_type: str, **fields: Any) -> None:
+    event = {"at": utc_now_iso(), "type": event_type, **fields}
+    append_jsonl(events_path, event)
+    for line in format_event_lines(event):
+        log(line)
+
+
+def new_schema_metrics() -> dict[str, Any]:
+    return {
+        "generated_at": utc_now_iso(),
+        "updated_at": utc_now_iso(),
+        "totals": {"attempts": 0, "passed": 0, "failed": 0, "pass_rate": 0.0},
+        "by_stage": {},
+    }
+
+
+def record_schema_attempt(
+    metrics: dict[str, Any],
+    *,
+    stage: str,
+    schema_name: str,
+    passed: bool,
+    duration_sec: float,
+    recovered_stdout: bool,
+    codex_exit_code: int | None,
+    error: str,
+) -> None:
+    totals = metrics.setdefault("totals", {"attempts": 0, "passed": 0, "failed": 0, "pass_rate": 0.0})
+    by_stage = metrics.setdefault("by_stage", {})
+    entry = by_stage.setdefault(
+        stage,
+        {
+            "schema": schema_name,
+            "attempts": 0,
+            "passed": 0,
+            "failed": 0,
+            "pass_rate": 0.0,
+            "last_duration_sec": 0.0,
+            "last_result": "",
+            "last_error": "",
+            "last_recovered_stdout": False,
+            "last_codex_exit_code": None,
+            "updated_at": "",
+        },
+    )
+
+    totals["attempts"] += 1
+    entry["attempts"] += 1
+
+    if passed:
+        totals["passed"] += 1
+        entry["passed"] += 1
+        entry["last_result"] = "passed"
+        entry["last_error"] = ""
+    else:
+        totals["failed"] += 1
+        entry["failed"] += 1
+        entry["last_result"] = "failed"
+        entry["last_error"] = compact_text(error, 800)
+
+    totals["pass_rate"] = round(
+        (totals["passed"] / totals["attempts"]) if totals["attempts"] else 0.0,
+        4,
+    )
+    entry["pass_rate"] = round(
+        (entry["passed"] / entry["attempts"]) if entry["attempts"] else 0.0,
+        4,
+    )
+    entry["last_duration_sec"] = round(duration_sec, 3)
+    entry["last_recovered_stdout"] = bool(recovered_stdout)
+    entry["last_codex_exit_code"] = codex_exit_code
+    entry["updated_at"] = utc_now_iso()
+    metrics["updated_at"] = utc_now_iso()
+
+
+def format_pass_rate(passed: int, attempts: int) -> str:
+    if attempts <= 0:
+        return "0.0%"
+    return f"{(passed / attempts) * 100:.1f}%"
+
+
 def run_codex_exec(
     prompt: str,
     schema_path: Path,
     out_json_path: Path,
     *,
     sandbox: str = "read-only",
-    model: str | None = None,
     live_search: bool = False,
     stage_label: str | None = None,
     heartbeat_seconds: int = 20,
-) -> dict:
-    cmd = ["codex", "--ask-for-approval", "never", "exec", "--skip-git-repo-check"]
+    return_meta: bool = False,
+) -> Any:
+    cmd = ["codex", "--ask-for-approval", "never"]
     if live_search:
         cmd.append("--search")
+    cmd += ["exec", "--skip-git-repo-check"]
     cmd += ["--sandbox", sandbox, "--output-schema", str(schema_path), "--output-last-message", str(out_json_path)]
-    if model:
-        cmd += ["--model", model]
     cmd += ["-"]
 
     started = time.perf_counter()
@@ -176,10 +332,12 @@ def run_codex_exec(
 
     file_raw = out_json_path.read_text(encoding="utf-8") if out_json_path.exists() else ""
     obj = try_parse_json(file_raw)
+    recovered_stdout = False
 
     if obj is None:
         obj = extract_json_object_from_text(stdout)
         if obj is not None:
+            recovered_stdout = True
             out_json_path.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
             if stage_label:
                 log(f"[RUN] {stage_label} | recovered JSON from stdout fallback")
@@ -192,7 +350,14 @@ def run_codex_exec(
             )
         if stage_label:
             log(f"[RUN] {stage_label} | done in {format_duration(time.perf_counter() - started)}")
-        return obj
+        meta = {
+            "duration_sec": round(time.perf_counter() - started, 3),
+            "codex_exit_code": proc.returncode,
+            "recovered_stdout": recovered_stdout,
+            "schema_name": schema_path.name,
+            "search_enabled": bool(live_search),
+        }
+        return (obj, meta) if return_meta else obj
 
     if proc.returncode != 0:
         raise RuntimeError(
@@ -260,11 +425,28 @@ def latest_run_id() -> str | None:
     return manifests[0].parent.name if manifests else None
 
 
-def resolve_goal(args: argparse.Namespace) -> str:
+def resolve_goal(args: argparse.Namespace, *, run_id: str | None = None) -> str:
     if args.goal and normalize_space(args.goal):
         return normalize_space(args.goal)
     if args.ticker:
         return f"Research {args.ticker.upper()} and explain the most decision-relevant findings."
+
+    if args.resume:
+        resume_run_id = run_id or args.run_id or load_last_run_id() or latest_run_id()
+        if resume_run_id:
+            run_dir = OUTPUT_ROOT / resume_run_id
+            manifest = load_json(run_dir / "run_manifest.json", {})
+            manifest_goal = normalize_space(str(manifest.get("goal", "")))
+            if manifest_goal:
+                return manifest_goal
+
+            goal_path = run_dir / "goal.txt"
+            if goal_path.exists():
+                goal_text = normalize_space(goal_path.read_text(encoding="utf-8"))
+                if goal_text:
+                    return goal_text
+        return "Resume existing research run."
+
     raise SystemExit("Provide --goal, or pass --ticker as a research hint.")
 
 
@@ -304,13 +486,83 @@ def resolve_mode(requested: str, goal: str, ticker: str | None) -> str:
     return "objective"
 
 
+def resolve_report_mode(requested: str, audience: str, goal: str) -> str:
+    if requested != "auto":
+        return requested
+
+    audience_lower = (audience or "").lower()
+    goal_lower = (goal or "").lower()
+
+    management_audience_markers = (
+        "management",
+        "executive",
+        "leadership",
+        "founder",
+        "ceo",
+        "exec",
+        "manager",
+        "管理层",
+        "高层",
+        "老板",
+        "决策层",
+    )
+    internal_share_markers = (
+        "share",
+        "sharing",
+        "internal share",
+        "discussion",
+        "brainstorm",
+        "teach-in",
+        "insight",
+        "hypothesis",
+        "idea",
+        "ideas",
+        "分享",
+        "讨论",
+        "脑暴",
+        "假设",
+        "想法",
+        "复盘",
+    )
+    management_goal_markers = (
+        "should we",
+        "whether",
+        "go/no-go",
+        "prioritize",
+        "priority",
+        "allocate",
+        "allocation",
+        "recommend",
+        "decision",
+        "judge",
+        "worth",
+        "enter",
+        "launch",
+        "资源配置",
+        "要不要",
+        "是否",
+        "优先级",
+        "决策",
+        "建议",
+        "判断",
+    )
+
+    if any(marker in audience_lower for marker in management_audience_markers):
+        return "management_brief"
+    if any(marker in goal_lower for marker in internal_share_markers):
+        return "internal_share"
+    if any(marker in goal_lower for marker in management_goal_markers):
+        return "management_brief"
+    return "management_brief"
+
+
 def resolve_workflow_config(workflow: str) -> dict[str, Any]:
     if workflow == "internal":
         return {
             "name": "internal",
             "label": "Internal Research Workflow",
             "stage_prompts_dir": ROOT / "prompts" / "stages",
-            "output_style": "internal_research_answer",
+            "output_style": "internal_research_report",
         }
     if workflow == "external":
         raise SystemExit("External workflow is scaffolded in CLI but not implemented yet. Use `internal` for now.")
@@ -598,6 +850,7 @@ def ensure_research_manifest(
     args: argparse.Namespace,
     goal: str,
     mode_resolved: str,
+    report_mode_resolved: str,
     workflow: dict[str, Any],
 ) -> tuple[Path, dict[str, Any]]:
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -615,6 +868,8 @@ def ensure_research_manifest(
     artifacts = {
         "goal": to_relative(run_dir / "goal.txt"),
         "notes": to_relative(run_dir / "notes.txt"),
+        "run_events": to_relative(run_dir / "run_events.jsonl"),
+        "schema_metrics": to_relative(run_dir / "schema_metrics.json"),
         "data_registry": to_relative(run_dir / "data_registry.json"),
         "research_brief": to_relative(run_dir / "research_brief.json"),
         "source_registry": to_relative(run_dir / "source_registry.json"),
@@ -636,6 +891,8 @@ def ensure_research_manifest(
         manifest.setdefault("stages", {})
         manifest.setdefault("goal", goal)
         manifest.setdefault("audience", args.audience)
+        manifest.setdefault("report_mode_requested", args.report_mode)
+        manifest.setdefault("report_mode_resolved", report_mode_resolved)
         manifest.setdefault("rounds_requested", args.rounds)
         manifest.setdefault("workflow_mode", workflow["name"])
         manifest.setdefault("workflow_label", workflow["label"])
@@ -649,6 +906,8 @@ def ensure_research_manifest(
             "goal": goal,
             "ticker_hint": (args.ticker or "").upper(),
             "audience": args.audience,
+            "report_mode_requested": args.report_mode,
+            "report_mode_resolved": report_mode_resolved,
             "workflow_mode": workflow["name"],
             "workflow_label": workflow["label"],
             "mode_requested": args.mode,
@@ -665,6 +924,8 @@ def ensure_research_manifest(
 
     ensure_text_file(run_dir / "goal.txt", f"{goal}\n")
     ensure_text_file(run_dir / "notes.txt", notes_seed)
+    ensure_text_file(run_dir / "run_events.jsonl", "")
+    ensure_json_file(run_dir / "schema_metrics.json", new_schema_metrics())
     ensure_json_file(run_dir / "data_registry.json", {"datasets": []})
     ensure_json_file(run_dir / "source_registry.json", {"sources": []})
     ensure_json_file(run_dir / "evidence_cards.json", {"evidence_cards": []})
@@ -744,9 +1005,26 @@ def render_markdownish(text: str) -> str:
 
 def render_final_answer_markdown(answer: dict[str, Any]) -> str:
     lines = [f"# {answer.get('title', 'Research Answer')}", ""]
+
+    report_mode = normalize_space(answer.get("report_mode", ""))
+    if report_mode:
+        lines.extend([f"_Report mode: {report_mode}_", ""])
+
+    focus = normalize_space(answer.get("decision_or_discussion_need", ""))
+    if focus:
+        lines.extend(["## Decision / Discussion Need", focus, ""])
+
     summary = normalize_space(answer.get("summary", ""))
     if summary:
         lines.extend([summary, ""])
+
+    takeaways = unique_strings(answer.get("top_takeaways", []), limit=5)
+    if takeaways:
+        heading = "Executive Takeaways" if report_mode == "management_brief" else "Top Takeaways"
+        lines.append(f"## {heading}")
+        for item in takeaways:
+            lines.append(f"- {item}")
+        lines.append("")
 
     for section in answer.get("sections", []):
         heading = normalize_space(section.get("heading", "Section"))
@@ -917,7 +1195,23 @@ def generate_workbench(
     )
     gap_section_html = contradiction_html + gap_cards_html or "<div class=\"empty\">No open gaps yet.</div>"
 
+    brief_report_mode = brief.get("report_mode", manifest.get("report_mode_resolved", ""))
+    brief_focus = brief.get("decision_or_discussion_need", "")
+
     if final_answer:
+        takeaways_html = ""
+        takeaways = unique_strings(final_answer.get("top_takeaways", []), limit=5)
+        if takeaways:
+            takeaways_heading = "Executive Takeaways" if final_answer.get("report_mode") == "management_brief" else "Top Takeaways"
+            takeaways_html = (
+                "<article class=\"card answer-card\">"
+                f"<div class=\"eyebrow\">{html.escape(takeaways_heading)}</div>"
+                + "<ul>"
+                + "".join(f"<li>{html.escape(item)}</li>" for item in takeaways)
+                + "</ul>"
+                "</article>"
+            )
+
         answer_sections_html = "".join(
             (
                 "<article class=\"card answer-card\">"
@@ -934,12 +1228,17 @@ def generate_workbench(
             )
             for section in final_answer.get("sections", [])
         )
+        focus_html = ""
+        if final_answer.get("decision_or_discussion_need"):
+            focus_html = f"<p class=\"meta\"><strong>Decision / Discussion Need:</strong> {html.escape(final_answer.get('decision_or_discussion_need', ''))}</p>"
         final_answer_html = (
             "<article class=\"card answer-hero\">"
-            f"<div class=\"eyebrow\">Final Answer · {html.escape(manifest.get('status', 'running'))}</div>"
+            f"<div class=\"eyebrow\">Final Answer · {html.escape(manifest.get('status', 'running'))} · {html.escape(final_answer.get('report_mode', brief_report_mode or ''))}</div>"
             f"<h2>{html.escape(final_answer.get('title', 'Research Answer'))}</h2>"
+            f"{focus_html}"
             f"{render_markdownish(final_answer.get('summary', ''))}"
             "</article>"
+            + takeaways_html
             + answer_sections_html
         )
     else:
@@ -1127,13 +1426,15 @@ def generate_workbench(
         <h1>{goal_text}</h1>
         <p class="meta">Run ID: {html.escape(manifest.get('run_id', ''))}</p>
         <p class="meta">Audience: {html.escape(manifest.get('audience', ''))}</p>
-        <p class="meta">Workflow: {html.escape(manifest.get('workflow_mode', 'internal'))} · Mode: {html.escape(manifest.get('mode_resolved', 'objective'))} · Output: {html.escape(manifest.get('output_style', 'research_answer'))}</p>
+        <p class="meta">Report mode: {html.escape(brief_report_mode or manifest.get('report_mode_resolved', 'management_brief'))}</p>
+        <p class="meta">Workflow: {html.escape(manifest.get('workflow_mode', 'internal'))} · Mode: {html.escape(manifest.get('mode_resolved', 'objective'))} · Output: {html.escape(manifest.get('output_style', 'internal_research_report'))}</p>
       </div>
       <div class="panel">
         <div class="eyebrow">Run Status</div>
         <div class="status-grid">
           <div class="status-chip"><strong>Status</strong><br>{html.escape(manifest.get('status', 'running'))}</div>
           <div class="status-chip"><strong>Current Round</strong><br>{html.escape(str(manifest.get('current_round', 0)))}</div>
+          <div class="status-chip"><strong>Report Mode</strong><br>{html.escape(brief_report_mode or manifest.get('report_mode_resolved', 'management_brief'))}</div>
           <div class="status-chip"><strong>Primary Entity</strong><br>{html.escape(manifest.get('primary_entity', '') or 'Unresolved')}</div>
           <div class="status-chip"><strong>Stop Reason</strong><br>{stop_reason}</div>
         </div>
@@ -1150,6 +1451,8 @@ def generate_workbench(
           <div class="eyebrow">Plan</div>
           <h2 class="section-title">{html.escape(brief.get('research_angle', 'Research Brief'))}</h2>
           <p>{html.escape(brief.get('objective_statement', 'Research brief not generated yet.'))}</p>
+          <p class="meta">Report mode: {html.escape(brief_report_mode or 'unresolved')}</p>
+          <p class="meta">Decision / Discussion Need: {html.escape(brief_focus or 'Not resolved yet.')}</p>
           <div class="card-grid">
             <div class="card">
               <div class="eyebrow">Key Questions</div>
@@ -1207,11 +1510,36 @@ def generate_workbench(
 
 def run_research_pipeline(args: argparse.Namespace) -> None:
     workflow = resolve_workflow_config(args.workflow)
-    goal = resolve_goal(args)
+    if args.resume:
+        run_id = resolve_research_run_id(args, "", args.ticker)
+        goal = resolve_goal(args, run_id=run_id)
+    else:
+        goal = resolve_goal(args)
+        run_id = resolve_research_run_id(args, goal, args.ticker)
     mode_resolved = resolve_mode(args.mode, goal, args.ticker)
-    run_id = resolve_research_run_id(args, goal, args.ticker)
+    report_mode_resolved = resolve_report_mode(args.report_mode, args.audience, goal)
     run_dir = OUTPUT_ROOT / run_id
-    manifest_path, manifest = ensure_research_manifest(run_dir, args, goal, mode_resolved, workflow)
+    manifest_path, manifest = ensure_research_manifest(
+        run_dir,
+        args,
+        goal,
+        mode_resolved,
+        report_mode_resolved,
+        workflow,
+    )
+    prior_current_round = 0
+    if args.resume:
+        try:
+            prior_current_round = int(manifest.get("current_round", 0))
+        except (TypeError, ValueError):
+            prior_current_round = 0
+    force_resume_additional_rounds = bool(args.resume and args.rounds > prior_current_round)
+    if force_resume_additional_rounds:
+        log(
+            f"[RESUME] requested rounds={args.rounds} exceeds previous current_round={prior_current_round}; "
+            "continuing beyond prior skeptic stop when needed."
+        )
+    research_updated = False
     interim_dir = run_dir / "interim"
 
     data_registry_path = run_dir / "data_registry.json"
@@ -1222,11 +1550,131 @@ def run_research_pipeline(args: argparse.Namespace) -> None:
     final_answer_json_path = run_dir / "final_answer.json"
     final_answer_md_path = run_dir / "final_answer.md"
     draft_answer_path = run_dir / "final_answer_draft.json"
+    events_path = run_dir / "run_events.jsonl"
+    schema_metrics_path = run_dir / "schema_metrics.json"
 
     prompts_dir = workflow["stage_prompts_dir"]
     schema_dir = ROOT / "schema"
 
     set_manifest_status(manifest_path, manifest, status="running", stop_reason="")
+
+    if args.resume:
+        schema_metrics = load_json(schema_metrics_path, new_schema_metrics())
+    else:
+        events_path.write_text("", encoding="utf-8")
+        schema_metrics = new_schema_metrics()
+        save_json(schema_metrics_path, schema_metrics)
+
+    event_counter = {"value": 0}
+
+    def next_item_id(prefix: str) -> str:
+        event_counter["value"] += 1
+        return f"{prefix}_{event_counter['value']:03d}"
+
+    def record_metrics_event() -> None:
+        totals = schema_metrics.get("totals", {})
+        emit_event(
+            events_path,
+            "metrics.schema",
+            attempts=totals.get("attempts", 0),
+            passed=totals.get("passed", 0),
+            failed=totals.get("failed", 0),
+            pass_rate=format_pass_rate(totals.get("passed", 0), totals.get("attempts", 0)),
+        )
+
+    def run_codex_stage(
+        *,
+        stage_key: str,
+        prompt: str,
+        schema_path: Path,
+        out_path: Path,
+        sandbox: str,
+        live_search: bool,
+        stage_label: str,
+    ) -> dict[str, Any]:
+        item_id = next_item_id("stage")
+        emit_event(
+            events_path,
+            "item.started",
+            item={
+                "id": item_id,
+                "type": "stage_execution",
+                "stage": stage_key,
+                "schema": schema_path.name,
+                "search": bool(live_search),
+                "sandbox": sandbox,
+            },
+        )
+        started = time.perf_counter()
+        passed = False
+        error_message = ""
+        meta: dict[str, Any] = {}
+        try:
+            result, meta = run_codex_exec(
+                prompt,
+                schema_path,
+                out_path,
+                sandbox=sandbox,
+                live_search=live_search,
+                stage_label=stage_label,
+                return_meta=True,
+            )
+            passed = True
+            return result
+        except Exception as exc:
+            error_message = str(exc)
+            raise
+        finally:
+            duration_sec = time.perf_counter() - started
+            record_schema_attempt(
+                schema_metrics,
+                stage=stage_key,
+                schema_name=schema_path.name,
+                passed=passed,
+                duration_sec=duration_sec,
+                recovered_stdout=bool(meta.get("recovered_stdout", False)),
+                codex_exit_code=meta.get("codex_exit_code"),
+                error=error_message,
+            )
+            save_json(schema_metrics_path, schema_metrics)
+            emit_event(
+                events_path,
+                "item.completed",
+                item={
+                    "id": item_id,
+                    "type": "stage_execution",
+                    "stage": stage_key,
+                    "status": "completed" if passed else "failed",
+                    "duration_sec": round(duration_sec, 3),
+                    "schema_pass": passed,
+                    "recovered_stdout": bool(meta.get("recovered_stdout", False)),
+                    "error": compact_text(error_message, 240) if error_message else "",
+                },
+            )
+            record_metrics_event()
+
+    emit_event(
+        events_path,
+        "thread.started",
+        thread_id=run_id,
+        workflow=workflow["name"],
+        audience=args.audience,
+    )
+    emit_event(events_path, "turn.started", label="bootstrap", round=0)
+    emit_event(
+        events_path,
+        "item.started",
+        item={
+            "id": next_item_id("todo"),
+            "type": "todo_list",
+            "items": [
+                {"text": "Index local data and build data registry", "completed": False},
+                {"text": "Run planning and multi-round source/evidence/skeptic loop", "completed": False},
+                {"text": "Synthesize and polish final structured answer", "completed": False},
+                {"text": "Track schema pass metrics and emit readable event logs", "completed": False},
+            ],
+        },
+    )
 
     data_registry = load_json(data_registry_path, {"datasets": []})
     brief = load_json(brief_path, {})
@@ -1250,6 +1698,7 @@ def run_research_pipeline(args: argparse.Namespace) -> None:
         )
         data_registry = build_data_registry(run_dir=run_dir, data_dir=ROOT / "data")
         save_json(data_registry_path, data_registry)
+        research_updated = True
         update_manifest_stage(
             manifest_path,
             manifest,
@@ -1306,17 +1755,23 @@ def run_research_pipeline(args: argparse.Namespace) -> None:
             summary="Building research brief.",
         )
         planning_prompt = render_template(prompts_dir / "research_planning.md", planning_mapping)
-        brief = run_codex_exec(
-            planning_prompt,
-            schema_dir / "research_brief.schema.json",
-            brief_path,
+        brief = run_codex_stage(
+            stage_key="planning",
+            prompt=planning_prompt,
+            schema_path=schema_dir / "research_brief.schema.json",
+            out_path=brief_path,
             sandbox="read-only",
-            model=args.model,
             live_search=False,
             stage_label="planning",
         )
         save_json(brief_path, brief)
+        research_updated = True
         manifest["primary_entity"] = brief.get("primary_entity", manifest.get("primary_entity", ""))
+        manifest["report_mode_resolved"] = brief.get("report_mode", manifest.get("report_mode_resolved", report_mode_resolved))
+        manifest["decision_or_discussion_need"] = brief.get(
+            "decision_or_discussion_need",
+            manifest.get("decision_or_discussion_need", ""),
+        )
         update_manifest_stage(
             manifest_path,
             manifest,
@@ -1342,6 +1797,7 @@ def run_research_pipeline(args: argparse.Namespace) -> None:
     )
 
     generate_workbench(run_dir, manifest, brief, data_registry, source_registry, evidence_cards, gap_log, final_answer)
+    emit_event(events_path, "turn.completed", label="bootstrap", round=0)
 
     stop_reason = ""
     last_skeptic_path: Path | None = None
@@ -1349,6 +1805,7 @@ def run_research_pipeline(args: argparse.Namespace) -> None:
     for round_num in range(1, args.rounds + 1):
         manifest["current_round"] = round_num
         save_json(manifest_path, manifest)
+        emit_event(events_path, "turn.started", label="research_round", round=round_num)
         round_mapping = {
             "<RUN_ID>": run_id,
             "<RUN_DIR>": to_relative(run_dir),
@@ -1375,15 +1832,16 @@ def run_research_pipeline(args: argparse.Namespace) -> None:
                 summary=f"Round {round_num}: gathering sources.",
             )
             scout_prompt = render_template(prompts_dir / "research_source_scout.md", round_mapping)
-            scout_obj = run_codex_exec(
-                scout_prompt,
-                schema_dir / "sources.schema.json",
-                scout_path,
+            scout_obj = run_codex_stage(
+                stage_key=f"source_scout_v{round_num}",
+                prompt=scout_prompt,
+                schema_path=schema_dir / "sources.schema.json",
+                out_path=scout_path,
                 sandbox="read-only",
-                model=args.model,
                 live_search=args.live_search,
                 stage_label=f"round {round_num} source_scout",
             )
+            research_updated = True
 
         source_registry, inserted_sources = merge_sources(
             source_registry,
@@ -1426,15 +1884,16 @@ def run_research_pipeline(args: argparse.Namespace) -> None:
                 summary=f"Round {round_num}: extracting evidence cards.",
             )
             evidence_prompt = render_template(prompts_dir / "research_evidence.md", round_mapping)
-            evidence_obj = run_codex_exec(
-                evidence_prompt,
-                schema_dir / "evidence_cards.schema.json",
-                evidence_path,
+            evidence_obj = run_codex_stage(
+                stage_key=f"evidence_v{round_num}",
+                prompt=evidence_prompt,
+                schema_path=schema_dir / "evidence_cards.schema.json",
+                out_path=evidence_path,
                 sandbox="read-only",
-                model=args.model,
                 live_search=False,
                 stage_label=f"round {round_num} evidence",
             )
+            research_updated = True
 
         evidence_cards, inserted_evidence = merge_evidence_cards(
             evidence_cards,
@@ -1465,7 +1924,9 @@ def run_research_pipeline(args: argparse.Namespace) -> None:
         generate_workbench(run_dir, manifest, brief, data_registry, source_registry, evidence_cards, gap_log, final_answer)
 
         skeptic_path = interim_dir / f"skeptic_v{round_num}.json"
+        skeptic_resumed = False
         if args.resume and skeptic_path.exists():
+            skeptic_resumed = True
             skeptic_obj = load_json(skeptic_path, {})
             log(f"[ROUND {round_num}] skeptic resume from {to_relative(skeptic_path)}")
         else:
@@ -1478,15 +1939,16 @@ def run_research_pipeline(args: argparse.Namespace) -> None:
                 summary=f"Round {round_num}: challenging the evidence set.",
             )
             skeptic_prompt = render_template(prompts_dir / "research_skeptic.md", round_mapping)
-            skeptic_obj = run_codex_exec(
-                skeptic_prompt,
-                schema_dir / "gaps.schema.json",
-                skeptic_path,
+            skeptic_obj = run_codex_stage(
+                stage_key=f"skeptic_v{round_num}",
+                prompt=skeptic_prompt,
+                schema_path=schema_dir / "gaps.schema.json",
+                out_path=skeptic_path,
                 sandbox="read-only",
-                model=args.model,
                 live_search=False,
                 stage_label=f"round {round_num} skeptic",
             )
+            research_updated = True
 
         gap_log, inserted_contradictions = merge_contradictions(
             gap_log,
@@ -1501,7 +1963,19 @@ def run_research_pipeline(args: argparse.Namespace) -> None:
         gap_log = merge_next_queries(gap_log, skeptic_obj.get("next_queries", []))
         save_json(gap_log_path, gap_log)
         continue_research = bool(skeptic_obj.get("continue_research", True))
-        stop_reason = normalize_space(skeptic_obj.get("stop_reason", "")) or stop_reason
+        if (
+            force_resume_additional_rounds
+            and skeptic_resumed
+            and not continue_research
+            and round_num < args.rounds
+        ):
+            log(
+                f"[ROUND {round_num}] overriding resumed skeptic sign-off "
+                f"to continue toward requested rounds={args.rounds}"
+            )
+            continue_research = True
+        elif normalize_space(skeptic_obj.get("stop_reason", "")):
+            stop_reason = normalize_space(skeptic_obj.get("stop_reason", "")) or stop_reason
         update_manifest_stage(
             manifest_path,
             manifest,
@@ -1517,6 +1991,7 @@ def run_research_pipeline(args: argparse.Namespace) -> None:
         )
         last_skeptic_path = skeptic_path
         generate_workbench(run_dir, manifest, brief, data_registry, source_registry, evidence_cards, gap_log, final_answer)
+        emit_event(events_path, "turn.completed", label="research_round", round=round_num)
 
         if not continue_research:
             break
@@ -1540,7 +2015,20 @@ def run_research_pipeline(args: argparse.Namespace) -> None:
         "<DRAFT_ANSWER_PATH>": to_relative(draft_answer_path),
     }
 
-    if args.resume and draft_answer_path.exists() and load_json(draft_answer_path, {}):
+    stages = manifest.get("stages", {})
+    synthesis_stage_status = normalize_space(str(stages.get("synthesis", {}).get("status", "")))
+    polish_stage_status = normalize_space(str(stages.get("polish", {}).get("status", "")))
+
+    can_resume_synthesis = (
+        args.resume
+        and not research_updated
+        and synthesis_stage_status == "completed"
+        and draft_answer_path.exists()
+        and bool(load_json(draft_answer_path, {}))
+    )
+    synthesis_ran = False
+
+    if can_resume_synthesis:
         draft_answer = load_json(draft_answer_path, {})
         log(f"[FINAL] synthesis resume from {to_relative(draft_answer_path)}")
     else:
@@ -1553,15 +2041,16 @@ def run_research_pipeline(args: argparse.Namespace) -> None:
             summary="Building direct research answer.",
         )
         synthesis_prompt = render_template(prompts_dir / "research_synthesis.md", synthesis_mapping)
-        draft_answer = run_codex_exec(
-            synthesis_prompt,
-            schema_dir / "final_answer.schema.json",
-            draft_answer_path,
+        draft_answer = run_codex_stage(
+            stage_key="synthesis",
+            prompt=synthesis_prompt,
+            schema_path=schema_dir / "final_answer.schema.json",
+            out_path=draft_answer_path,
             sandbox="read-only",
-            model=args.model,
             live_search=False,
             stage_label="final synthesis",
         )
+        synthesis_ran = True
         update_manifest_stage(
             manifest_path,
             manifest,
@@ -1572,7 +2061,20 @@ def run_research_pipeline(args: argparse.Namespace) -> None:
             meta={"sections": len(draft_answer.get("sections", []))},
         )
 
-    if args.resume and final_answer_json_path.exists() and load_json(final_answer_json_path, {}):
+    draft_mtime = draft_answer_path.stat().st_mtime if draft_answer_path.exists() else 0.0
+    final_mtime = final_answer_json_path.stat().st_mtime if final_answer_json_path.exists() else 0.0
+
+    can_resume_polish = (
+        args.resume
+        and not research_updated
+        and not synthesis_ran
+        and polish_stage_status == "completed"
+        and final_answer_json_path.exists()
+        and final_mtime >= draft_mtime
+        and bool(load_json(final_answer_json_path, {}))
+    )
+
+    if can_resume_polish:
         final_answer = load_json(final_answer_json_path, {})
         log(f"[FINAL] polish resume from {to_relative(final_answer_json_path)}")
     else:
@@ -1585,12 +2087,12 @@ def run_research_pipeline(args: argparse.Namespace) -> None:
             summary="Polishing final research answer.",
         )
         polish_prompt = render_template(prompts_dir / "research_polish.md", synthesis_mapping)
-        final_answer = run_codex_exec(
-            polish_prompt,
-            schema_dir / "final_answer.schema.json",
-            final_answer_json_path,
+        final_answer = run_codex_stage(
+            stage_key="polish",
+            prompt=polish_prompt,
+            schema_path=schema_dir / "final_answer.schema.json",
+            out_path=final_answer_json_path,
             sandbox="read-only",
-            model=args.model,
             live_search=False,
             stage_label="final polish",
         )
@@ -1609,6 +2111,19 @@ def run_research_pipeline(args: argparse.Namespace) -> None:
     final_answer_md_path.write_text(render_final_answer_markdown(final_answer), encoding="utf-8")
     set_manifest_status(manifest_path, manifest, status="completed", stop_reason=stop_reason)
     generate_workbench(run_dir, manifest, brief, data_registry, source_registry, evidence_cards, gap_log, final_answer)
+    record_metrics_event()
+    totals = schema_metrics.get("totals", {})
+    emit_event(
+        events_path,
+        "thread.completed",
+        thread_id=run_id,
+        status="completed",
+        stop_reason=stop_reason,
+        schema_attempts=totals.get("attempts", 0),
+        schema_passed=totals.get("passed", 0),
+        schema_failed=totals.get("failed", 0),
+        schema_pass_rate=format_pass_rate(totals.get("passed", 0), totals.get("attempts", 0)),
+    )
     print(f"[OK] Finished. See: {run_dir}")
 
 
@@ -1625,11 +2140,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ticker", help="optional primary asset hint, e.g. ETH or HYPE")
     parser.add_argument("--mode", choices=["auto", "objective", "ticker"], default="auto")
     parser.add_argument("--audience", default="internal_strategy_team")
-    parser.add_argument("--model", default="gpt-5.4", help="override parent orchestration model")
+    parser.add_argument(
+        "--report-mode",
+        choices=REPORT_MODE_CHOICES,
+        default="auto",
+        help="internal report shape: auto, management_brief, or internal_share",
+    )
     parser.add_argument("--live-search", action="store_true", help="enable live web search where supported")
     parser.add_argument("--resume", action="store_true", help="resume from the last or specified run")
     parser.add_argument("--run-id", help="resume or force a specific run id for research mode")
-    parser.add_argument("--rounds", type=int, default=3, help="max research rounds")
+    parser.add_argument("--rounds", type=int, default=1, help="max research rounds")
     return parser
 
 
@@ -1647,6 +2167,14 @@ def main() -> None:
             manifest = load_json(manifest_path, {})
             if manifest:
                 set_manifest_status(manifest_path, manifest, status="failed", stop_reason=str(exc))
+            events_path = OUTPUT_ROOT / run_id / "run_events.jsonl"
+            emit_event(
+                events_path,
+                "thread.completed",
+                thread_id=run_id,
+                status="failed",
+                stop_reason=str(exc),
+            )
         raise
 
 

@@ -1,10 +1,16 @@
-model = "gpt-5.4"
-model_reasoning_effort = "xhigh"
+model = "gpt-5.3-codex"
+model_reasoning_effort = "medium"
 sandbox_mode = "read-only"
+
 developer_instructions = """
-You are the editor for a goal-driven crypto research system.
+You are the editor for a goal-driven internal crypto research system.
+
 Read:
 - prompts/engine/research_polish_system.md
-Improve structure and clarity only. Do not add facts or new claims.
-Return structured JSON only when asked.
+
+Important:
+- The result must satisfy schema/final_answer.schema.json.
+- Improve readability without changing the factual proposition set.
+- Preserve evidence references and caveats.
+- Return structured JSON only when asked.
 """

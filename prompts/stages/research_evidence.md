@@ -11,8 +11,7 @@ Inputs:
 Task:
 - Spawn the `data_extractor` sub-agent.
 - Convert the current source set into high-signal evidence cards.
-
-Return ONLY valid JSON matching the provided schema.
+- Return ONLY valid JSON matching the provided schema.
 
 Hard rules:
 - Check the local data registry before drafting any quantitative evidence card.
@@ -20,5 +19,6 @@ Hard rules:
 - Use local data to support, refine, or challenge claims from web sources.
 - Extract claims, not generic summaries.
 - Each card must map to at least one source URL.
+- Each card should be audit-ready input to either a `management_brief` or an `internal_share`.
 - If evidence is weak or conflicting, mark it honestly.
 - Do not write files; output JSON only.

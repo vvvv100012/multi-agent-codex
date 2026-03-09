@@ -12,12 +12,12 @@ Inputs:
 Task:
 - Spawn the `editor` sub-agent.
 - Polish the structured final answer for clarity and readability.
-
-Return ONLY valid JSON matching the provided schema.
+- Return ONLY valid JSON matching the provided schema.
 
 Hard rules:
 - Do not add new facts.
-- Preserve local-data-backed evidence references and caveats.
-- Preserve evidence references.
-- Keep the output a research answer unless the brief explicitly says otherwise.
+- Preserve `report_mode`, `decision_or_discussion_need`, `top_takeaways`, evidence references, and caveats.
+- For `management_brief`, optimize scanability and compression.
+- For `internal_share`, improve flow while preserving the core insight and discussion utility.
+- Keep the output a `research_answer`.
 - Do not write files; output JSON only.

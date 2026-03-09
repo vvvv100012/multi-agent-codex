@@ -1,36 +1,39 @@
-## Goal-Driven Research Crypto
+## Goal-Driven Internal Crypto Research Reports
 
 This project is a goal-driven workflow that turns a plain-language research objective into:
+
 `research_brief -> source_registry -> evidence_cards -> gap_log -> final_answer -> workbench`
+
+The system is still **internal-first**. It now supports two internal report shapes while keeping the same research pipeline and final JSON/Markdown artifacts:
+
+- `management_brief`: decision-first, compressed, implication-heavy
+- `internal_share`: insight-first, mechanism-aware, discussion-friendly
 
 ### Research mode
 
-Example:
+Management brief example:
 
 ```bash
-python3 scripts/run_pipeline.py \
-  internal \
-  --goal "Do a quick Hyperliquid tradfi/rwa market study. Focus on implementation, product richness, volume growth, and user demand. The purpose is to judge how far traditional-asset perpetuals have progressed." \
-  --live-search
+python3 scripts/run_pipeline.py   internal   --goal "Do a quick Hyperliquid tradfi/rwa market study. Focus on implementation, product richness, volume growth, and user demand. The purpose is to judge how far traditional-asset perpetuals have progressed."   --audience management   --report-mode management_brief   --live-search
+```
+
+Internal share example:
+
+```bash
+python3 scripts/run_pipeline.py   internal   --goal "Prepare an internal sharing note on how tokenized treasury demand is splitting across venues, and what this might imply for future exchange product design."   --audience internal_research_team   --report-mode internal_share   --live-search
 ```
 
 Useful flags:
 
 ```bash
-python3 scripts/run_pipeline.py \
-  internal \
-  --goal "Compare the current state of tokenized treasuries demand across major crypto venues." \
-  --ticker ONDO \
-  --mode auto \
-  --audience internal_strategy_team \
-  --rounds 3 \
-  --model gpt-5.4 \
-  --live-search
+python3 scripts/run_pipeline.py   internal   --goal "Compare the current state of tokenized treasuries demand across major crypto venues."   --ticker ONDO   --mode auto   --audience internal_strategy_team   --report-mode auto   --rounds 3   --live-search
 ```
 
 Outputs are written to `output/<RUN_ID>/`:
 
 - `run_manifest.json`
+- `run_events.jsonl`
+- `schema_metrics.json`
 - `data_registry.json`
 - `research_brief.json`
 - `source_registry.json`
@@ -60,11 +63,11 @@ python3 scripts/build_data_registry.py --output output/data_registry_preview.jso
 
 ### Design notes
 
-- CLI now exposes two workflow entrypoints: `internal` and `external`.
-- Only `internal` is implemented today. `external` is reserved for a future public-facing research workflow with different prompts and report structure.
+- CLI exposes two workflow entrypoints: `internal` and `external`.
+- Only `internal` is implemented today. `external` remains reserved for a future public-facing workflow.
 - The default workflow is goal-driven, not ticker-driven.
-- The final deliverable is a research answer, not a forced LONG/SHORT/PASS memo.
-- The multi-agent team is now `planner / scope_guard / research_scout / data_extractor / skeptic / synthesizer / editor`.
+- The final deliverable stays `research_answer`, but it is now shaped as either a `management_brief` or an `internal_share`.
+- The multi-agent team is `planner / scope_guard / research_scout / data_extractor / skeptic / synthesizer / editor`.
 - The workflow assumes you precompute datasets into `data/` ahead of time.
 - `data_registry.json` is generated from `data/` and tells agents which local files exist, what structure they have, and how they should be used.
 - Local datasets are indexed into `source_registry.json` as `Data` sources so agents can cite them directly and use web search mainly for context or validation.

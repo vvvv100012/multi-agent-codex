@@ -1,35 +1,83 @@
 {
   "type": "object",
   "properties": {
-    "run_id": { "type": "string" },
-    "title": { "type": "string" },
-    "summary": { "type": "string" },
+    "run_id": {
+      "type": "string"
+    },
+    "report_mode": {
+      "type": "string",
+      "enum": [
+        "management_brief",
+        "internal_share"
+      ]
+    },
+    "title": {
+      "type": "string"
+    },
+    "decision_or_discussion_need": {
+      "type": "string"
+    },
+    "summary": {
+      "type": "string"
+    },
+    "top_takeaways": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 5,
+      "items": {
+        "type": "string"
+      }
+    },
     "sections": {
       "type": "array",
       "minItems": 4,
       "items": {
         "type": "object",
         "properties": {
-          "heading": { "type": "string" },
-          "body": { "type": "string" },
+          "heading": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          },
           "evidence_ids": {
             "type": "array",
-            "items": { "type": "string" }
+            "items": {
+              "type": "string"
+            }
           }
         },
-        "required": ["heading", "body", "evidence_ids"],
+        "required": [
+          "heading",
+          "body",
+          "evidence_ids"
+        ],
         "additionalProperties": false
       }
     },
     "open_gaps": {
       "type": "array",
-      "items": { "type": "string" }
+      "items": {
+        "type": "string"
+      }
     },
     "next_actions": {
       "type": "array",
-      "items": { "type": "string" }
+      "items": {
+        "type": "string"
+      }
     }
   },
-  "required": ["run_id", "title", "summary", "sections", "open_gaps", "next_actions"],
+  "required": [
+    "run_id",
+    "report_mode",
+    "title",
+    "decision_or_discussion_need",
+    "summary",
+    "top_takeaways",
+    "sections",
+    "open_gaps",
+    "next_actions"
+  ],
   "additionalProperties": false
 }
