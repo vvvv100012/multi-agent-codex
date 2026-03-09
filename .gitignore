@@ -1,5 +1,4 @@
 output/
-.codex/
 .codex-log/
 *.log
 .env

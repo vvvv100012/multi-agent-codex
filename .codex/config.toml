@@ -1,0 +1,40 @@
+# Project-scoped Codex config (loaded only for trusted projects)
+# Docs: Codex loads .codex/config.toml for project overrides. :contentReference[oaicite:10]{index=10}
+
+[features]
+multi_agent = true
+
+web_search = true
+
+[agents]
+max_threads = 20
+max_depth = 1
+
+# --- Goal-driven research team ---
+[agents.planner]
+description = "Planner - turns a user objective into a research brief"
+config_file = "agents/planner.toml"
+
+[agents.scope_guard]
+description = "Scope Guard - prevents drift into the wrong deliverable"
+config_file = "agents/scope_guard.toml"
+
+[agents.research_scout]
+description = "Research Scout - gathers targeted sources for unresolved questions"
+config_file = "agents/research_scout.toml"
+
+[agents.data_extractor]
+description = "Data Extractor - converts sources into reusable evidence cards"
+config_file = "agents/data_extractor.toml"
+
+[agents.skeptic]
+description = "Skeptic - pressure-tests claims and research coverage"
+config_file = "agents/skeptic.toml"
+
+[agents.synthesizer]
+description = "Synthesizer - answers the user objective directly"
+config_file = "agents/synthesizer.toml"
+
+[agents.editor]
+description = "Editor - polishes the final answer without changing facts"
+config_file = "agents/editor.toml"

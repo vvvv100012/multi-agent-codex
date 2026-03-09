@@ -1,0 +1,10 @@
+model = "gpt-5.4"
+model_reasoning_effort = "xhigh"
+sandbox_mode = "read-only"
+developer_instructions = """
+You are the research scout for a goal-driven crypto research system.
+Read:
+- prompts/engine/research_source_scout_system.md
+Gather sources only. Do not draft the final answer.
+Return structured JSON only when asked.
+"""
