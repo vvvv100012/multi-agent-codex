@@ -1,0 +1,7 @@
+output/
+.codex/
+.codex-log/
+*.log
+.env
+__pycache__/
+*.pyc

@@ -1,0 +1,500 @@
+{
+  "collector_id": "rwa_volume",
+  "collector_name": "Hyperliquid RWA Volume",
+  "generated_at": "2026-03-09T05:45:50.749842Z",
+  "api_url": "https://api.hyperliquid.xyz/info",
+  "date_range": {
+    "start": "2025-11-12",
+    "end": "2026-03-09",
+    "days": 118
+  },
+  "dexes_queried": [
+    "xyz",
+    "flx",
+    "km",
+    "cash",
+    "vntl"
+  ],
+  "discovered_pairs": [
+    {
+      "dex": "xyz",
+      "count": 27,
+      "symbols": [
+        "xyz:TSLA",
+        "xyz:NVDA",
+        "xyz:GOLD",
+        "xyz:HOOD",
+        "xyz:INTC",
+        "xyz:PLTR",
+        "xyz:COIN",
+        "xyz:META",
+        "xyz:AAPL",
+        "xyz:MSFT",
+        "xyz:ORCL",
+        "xyz:GOOGL",
+        "xyz:AMZN",
+        "xyz:AMD",
+        "xyz:MU",
+        "xyz:SNDK",
+        "xyz:MSTR",
+        "xyz:NFLX",
+        "xyz:JPY",
+        "xyz:EUR",
+        "xyz:SILVER",
+        "xyz:RIVN",
+        "xyz:CL",
+        "xyz:COPPER",
+        "xyz:NATGAS",
+        "xyz:PLATINUM",
+        "xyz:URNM"
+      ]
+    },
+    {
+      "dex": "flx",
+      "count": 8,
+      "symbols": [
+        "flx:TSLA",
+        "flx:NVDA",
+        "flx:COIN",
+        "flx:GOLD",
+        "flx:SILVER",
+        "flx:COPPER",
+        "flx:PLATINUM",
+        "flx:USA500"
+      ]
+    },
+    {
+      "dex": "km",
+      "count": 11,
+      "symbols": [
+        "km:US500",
+        "km:EUR",
+        "km:USTECH",
+        "km:TSLA",
+        "km:SILVER",
+        "km:GOLD",
+        "km:AAPL",
+        "km:GOOGL",
+        "km:NVDA",
+        "km:MU",
+        "km:PLTR"
+      ]
+    },
+    {
+      "dex": "cash",
+      "count": 11,
+      "symbols": [
+        "cash:USA500",
+        "cash:TSLA",
+        "cash:NVDA",
+        "cash:HOOD",
+        "cash:GOOGL",
+        "cash:INTC",
+        "cash:AMZN",
+        "cash:MSFT",
+        "cash:META",
+        "cash:GOLD",
+        "cash:SILVER"
+      ]
+    },
+    {
+      "dex": "vntl",
+      "count": 1,
+      "symbols": [
+        "vntl:MAG7"
+      ]
+    }
+  ],
+  "headline_takeaways": [
+    "On 2026-03-09, the largest single-day volumes were in CL ($349432209), SILVER ($195981812), GOLD ($34105239).",
+    "Over the last 30 days, volume was concentrated in Commodities ($19809754712), Stocks ($5499457422), Indices ($4048461212)."
+  ],
+  "top_assets_latest_1d": [
+    {
+      "asset": "CL",
+      "category": "Commodities",
+      "display_name": "原油 (Crude Oil)",
+      "latest_1d_volume_usd": 349432208.53,
+      "last_7d_volume_usd": 1966281715.43,
+      "last_30d_volume_usd": 2270783833.72,
+      "since_start_volume_usd": 2395971440.76,
+      "active_days": 63
+    },
+    {
+      "asset": "SILVER",
+      "category": "Commodities",
+      "display_name": "白银 (Silver)",
+      "latest_1d_volume_usd": 195981812.36,
+      "last_7d_volume_usd": 4248707578.79,
+      "last_30d_volume_usd": 14097042686.91,
+      "since_start_volume_usd": 34078550758.95,
+      "active_days": 83
+    },
+    {
+      "asset": "GOLD",
+      "category": "Commodities",
+      "display_name": "黄金 (Gold)",
+      "latest_1d_volume_usd": 34105238.63,
+      "last_7d_volume_usd": 753036493.61,
+      "last_30d_volume_usd": 2561542313.68,
+      "since_start_volume_usd": 6767861957.3,
+      "active_days": 88
+    },
+    {
+      "asset": "USA500",
+      "category": "Indices",
+      "display_name": "标普500 (S&P 500)",
+      "latest_1d_volume_usd": 28821559.69,
+      "last_7d_volume_usd": 1231812493.19,
+      "last_30d_volume_usd": 3886110664.73,
+      "since_start_volume_usd": 5829235893.64,
+      "active_days": 57
+    },
+    {
+      "asset": "HOOD",
+      "category": "Stocks",
+      "display_name": "罗宾汉 (Robinhood)",
+      "latest_1d_volume_usd": 10455130.65,
+      "last_7d_volume_usd": 198814742.2,
+      "last_30d_volume_usd": 573830522.82,
+      "since_start_volume_usd": 1210796531.96,
+      "active_days": 104
+    },
+    {
+      "asset": "COPPER",
+      "category": "Commodities",
+      "display_name": "铜 (Copper)",
+      "latest_1d_volume_usd": 9148102.89,
+      "last_7d_volume_usd": 77972841.6,
+      "last_30d_volume_usd": 376159763.57,
+      "since_start_volume_usd": 1702774534.71,
+      "active_days": 55
+    },
+    {
+      "asset": "MU",
+      "category": "Stocks",
+      "display_name": "美光科技 (Micron)",
+      "latest_1d_volume_usd": 8977544.91,
+      "last_7d_volume_usd": 81395178.6,
+      "last_30d_volume_usd": 344201182.7,
+      "since_start_volume_usd": 554349235.92,
+      "active_days": 81
+    },
+    {
+      "asset": "NVDA",
+      "category": "Stocks",
+      "display_name": "英伟达 (NVIDIA)",
+      "latest_1d_volume_usd": 8335771.56,
+      "last_7d_volume_usd": 446165807.82,
+      "last_30d_volume_usd": 1319546198.33,
+      "since_start_volume_usd": 2975861908.35,
+      "active_days": 118
+    },
+    {
+      "asset": "PLATINUM",
+      "category": "Commodities",
+      "display_name": "铂金 (Platinum)",
+      "latest_1d_volume_usd": 7205740.23,
+      "last_7d_volume_usd": 118126245.0,
+      "last_30d_volume_usd": 276651609.78,
+      "since_start_volume_usd": 461556251.01,
+      "active_days": 42
+    },
+    {
+      "asset": "TSLA",
+      "category": "Stocks",
+      "display_name": "特斯拉 (Tesla)",
+      "latest_1d_volume_usd": 6919626.77,
+      "last_7d_volume_usd": 163947731.6,
+      "last_30d_volume_usd": 572333336.89,
+      "since_start_volume_usd": 2129678164.72,
+      "active_days": 117
+    }
+  ],
+  "top_assets_last_30d": [
+    {
+      "asset": "SILVER",
+      "category": "Commodities",
+      "display_name": "白银 (Silver)",
+      "latest_1d_volume_usd": 195981812.36,
+      "last_7d_volume_usd": 4248707578.79,
+      "last_30d_volume_usd": 14097042686.91,
+      "since_start_volume_usd": 34078550758.95,
+      "active_days": 83
+    },
+    {
+      "asset": "USA500",
+      "category": "Indices",
+      "display_name": "标普500 (S&P 500)",
+      "latest_1d_volume_usd": 28821559.69,
+      "last_7d_volume_usd": 1231812493.19,
+      "last_30d_volume_usd": 3886110664.73,
+      "since_start_volume_usd": 5829235893.64,
+      "active_days": 57
+    },
+    {
+      "asset": "GOLD",
+      "category": "Commodities",
+      "display_name": "黄金 (Gold)",
+      "latest_1d_volume_usd": 34105238.63,
+      "last_7d_volume_usd": 753036493.61,
+      "last_30d_volume_usd": 2561542313.68,
+      "since_start_volume_usd": 6767861957.3,
+      "active_days": 88
+    },
+    {
+      "asset": "CL",
+      "category": "Commodities",
+      "display_name": "原油 (Crude Oil)",
+      "latest_1d_volume_usd": 349432208.53,
+      "last_7d_volume_usd": 1966281715.43,
+      "last_30d_volume_usd": 2270783833.72,
+      "since_start_volume_usd": 2395971440.76,
+      "active_days": 63
+    },
+    {
+      "asset": "NVDA",
+      "category": "Stocks",
+      "display_name": "英伟达 (NVIDIA)",
+      "latest_1d_volume_usd": 8335771.56,
+      "last_7d_volume_usd": 446165807.82,
+      "last_30d_volume_usd": 1319546198.33,
+      "since_start_volume_usd": 2975861908.35,
+      "active_days": 118
+    },
+    {
+      "asset": "HOOD",
+      "category": "Stocks",
+      "display_name": "罗宾汉 (Robinhood)",
+      "latest_1d_volume_usd": 10455130.65,
+      "last_7d_volume_usd": 198814742.2,
+      "last_30d_volume_usd": 573830522.82,
+      "since_start_volume_usd": 1210796531.96,
+      "active_days": 104
+    },
+    {
+      "asset": "TSLA",
+      "category": "Stocks",
+      "display_name": "特斯拉 (Tesla)",
+      "latest_1d_volume_usd": 6919626.77,
+      "last_7d_volume_usd": 163947731.6,
+      "last_30d_volume_usd": 572333336.89,
+      "since_start_volume_usd": 2129678164.72,
+      "active_days": 117
+    },
+    {
+      "asset": "INTC",
+      "category": "Stocks",
+      "display_name": "英特尔 (Intel)",
+      "latest_1d_volume_usd": 5668838.98,
+      "last_7d_volume_usd": 122562345.08,
+      "last_30d_volume_usd": 422732843.54,
+      "since_start_volume_usd": 899993820.37,
+      "active_days": 97
+    },
+    {
+      "asset": "COPPER",
+      "category": "Commodities",
+      "display_name": "铜 (Copper)",
+      "latest_1d_volume_usd": 9148102.89,
+      "last_7d_volume_usd": 77972841.6,
+      "last_30d_volume_usd": 376159763.57,
+      "since_start_volume_usd": 1702774534.71,
+      "active_days": 55
+    },
+    {
+      "asset": "MU",
+      "category": "Stocks",
+      "display_name": "美光科技 (Micron)",
+      "latest_1d_volume_usd": 8977544.91,
+      "last_7d_volume_usd": 81395178.6,
+      "last_30d_volume_usd": 344201182.7,
+      "since_start_volume_usd": 554349235.92,
+      "active_days": 81
+    }
+  ],
+  "top_assets_since_start": [
+    {
+      "asset": "SILVER",
+      "category": "Commodities",
+      "display_name": "白银 (Silver)",
+      "latest_1d_volume_usd": 195981812.36,
+      "last_7d_volume_usd": 4248707578.79,
+      "last_30d_volume_usd": 14097042686.91,
+      "since_start_volume_usd": 34078550758.95,
+      "active_days": 83
+    },
+    {
+      "asset": "GOLD",
+      "category": "Commodities",
+      "display_name": "黄金 (Gold)",
+      "latest_1d_volume_usd": 34105238.63,
+      "last_7d_volume_usd": 753036493.61,
+      "last_30d_volume_usd": 2561542313.68,
+      "since_start_volume_usd": 6767861957.3,
+      "active_days": 88
+    },
+    {
+      "asset": "USA500",
+      "category": "Indices",
+      "display_name": "标普500 (S&P 500)",
+      "latest_1d_volume_usd": 28821559.69,
+      "last_7d_volume_usd": 1231812493.19,
+      "last_30d_volume_usd": 3886110664.73,
+      "since_start_volume_usd": 5829235893.64,
+      "active_days": 57
+    },
+    {
+      "asset": "NVDA",
+      "category": "Stocks",
+      "display_name": "英伟达 (NVIDIA)",
+      "latest_1d_volume_usd": 8335771.56,
+      "last_7d_volume_usd": 446165807.82,
+      "last_30d_volume_usd": 1319546198.33,
+      "since_start_volume_usd": 2975861908.35,
+      "active_days": 118
+    },
+    {
+      "asset": "CL",
+      "category": "Commodities",
+      "display_name": "原油 (Crude Oil)",
+      "latest_1d_volume_usd": 349432208.53,
+      "last_7d_volume_usd": 1966281715.43,
+      "last_30d_volume_usd": 2270783833.72,
+      "since_start_volume_usd": 2395971440.76,
+      "active_days": 63
+    },
+    {
+      "asset": "TSLA",
+      "category": "Stocks",
+      "display_name": "特斯拉 (Tesla)",
+      "latest_1d_volume_usd": 6919626.77,
+      "last_7d_volume_usd": 163947731.6,
+      "last_30d_volume_usd": 572333336.89,
+      "since_start_volume_usd": 2129678164.72,
+      "active_days": 117
+    },
+    {
+      "asset": "COPPER",
+      "category": "Commodities",
+      "display_name": "铜 (Copper)",
+      "latest_1d_volume_usd": 9148102.89,
+      "last_7d_volume_usd": 77972841.6,
+      "last_30d_volume_usd": 376159763.57,
+      "since_start_volume_usd": 1702774534.71,
+      "active_days": 55
+    },
+    {
+      "asset": "GOOGL",
+      "category": "Stocks",
+      "display_name": "谷歌 (Alphabet)",
+      "latest_1d_volume_usd": 2766335.26,
+      "last_7d_volume_usd": 79961299.75,
+      "last_30d_volume_usd": 332160261.17,
+      "since_start_volume_usd": 1319833047.03,
+      "active_days": 112
+    },
+    {
+      "asset": "HOOD",
+      "category": "Stocks",
+      "display_name": "罗宾汉 (Robinhood)",
+      "latest_1d_volume_usd": 10455130.65,
+      "last_7d_volume_usd": 198814742.2,
+      "last_30d_volume_usd": 573830522.82,
+      "since_start_volume_usd": 1210796531.96,
+      "active_days": 104
+    },
+    {
+      "asset": "INTC",
+      "category": "Stocks",
+      "display_name": "英特尔 (Intel)",
+      "latest_1d_volume_usd": 5668838.98,
+      "last_7d_volume_usd": 122562345.08,
+      "last_30d_volume_usd": 422732843.54,
+      "since_start_volume_usd": 899993820.37,
+      "active_days": 97
+    }
+  ],
+  "category_latest_1d": [
+    {
+      "category": "Commodities",
+      "latest_1d_volume_usd": 602172506.16,
+      "last_30d_volume_usd": 19809754712.1,
+      "since_start_volume_usd": 45762654752.68
+    },
+    {
+      "category": "Stocks",
+      "latest_1d_volume_usd": 66503945.15,
+      "last_30d_volume_usd": 5499457421.74,
+      "since_start_volume_usd": 14387241101.24
+    },
+    {
+      "category": "Indices",
+      "latest_1d_volume_usd": 30810286.63,
+      "last_30d_volume_usd": 4048461212.26,
+      "since_start_volume_usd": 6208291813.81
+    },
+    {
+      "category": "Forex",
+      "latest_1d_volume_usd": 10705393.21,
+      "last_30d_volume_usd": 369687404.81,
+      "since_start_volume_usd": 671686821.35
+    }
+  ],
+  "category_last_30d": [
+    {
+      "category": "Commodities",
+      "latest_1d_volume_usd": 602172506.16,
+      "last_30d_volume_usd": 19809754712.1,
+      "since_start_volume_usd": 45762654752.68
+    },
+    {
+      "category": "Stocks",
+      "latest_1d_volume_usd": 66503945.15,
+      "last_30d_volume_usd": 5499457421.74,
+      "since_start_volume_usd": 14387241101.24
+    },
+    {
+      "category": "Indices",
+      "latest_1d_volume_usd": 30810286.63,
+      "last_30d_volume_usd": 4048461212.26,
+      "since_start_volume_usd": 6208291813.81
+    },
+    {
+      "category": "Forex",
+      "latest_1d_volume_usd": 10705393.21,
+      "last_30d_volume_usd": 369687404.81,
+      "since_start_volume_usd": 671686821.35
+    }
+  ],
+  "artifacts": [
+    {
+      "label": "detail_csv",
+      "path": "/Users/xc/Documents/mirofish/rwa_volume_detail.csv"
+    },
+    {
+      "label": "aggregated_csv",
+      "path": "/Users/xc/Documents/mirofish/rwa_volume_aggregated.csv"
+    },
+    {
+      "label": "pivot_csv",
+      "path": "/Users/xc/Documents/mirofish/rwa_volume_pivot.csv"
+    },
+    {
+      "label": "pivot_ma7_csv",
+      "path": "/Users/xc/Documents/mirofish/rwa_volume_pivot_ma7.csv"
+    },
+    {
+      "label": "sector_csv",
+      "path": "/Users/xc/Documents/mirofish/rwa_volume_sector.csv"
+    },
+    {
+      "label": "sector_ma7_csv",
+      "path": "/Users/xc/Documents/mirofish/rwa_volume_sector_ma7.csv"
+    },
+    {
+      "label": "summary_json",
+      "path": "/Users/xc/Documents/mirofish/rwa_volume_summary.json"
+    }
+  ]
+}

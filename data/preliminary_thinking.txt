@@ -1,0 +1,5 @@
+1. 真实需求是有的，而且不小。 但它首先是 crypto-native 用户对 TradFi price exposure 的需求，不是成熟的机构级套保市场。HIP-3 的产品形态本来就是 perp；而 trade[XYZ] 文档也写明其前端对 美国和部分受限司法辖区不可用，说明当前最强需求并不是传统美国零售券商用户的大规模迁移。
+
+2. 增长速度很快，但当前增速不能直接外推。 因为放量明显受 贵金属/指数大波动 和 builder 激励推动。至少从 builder 侧文档还能看到明显的 bootstrap 设计：例如 Ventuals 明写其 indices markets 开着 growth mode，all-in 费用下降 90%；而外部研究也提到 Felix / Markets 有 points 体系。
+
+3. 现阶段最强需求明显集中在 股指、贵金属、主要 FX、少数高关注单股。真实需求最强的不是长尾单名股票，而是“宏观/大类资产暴露”。
