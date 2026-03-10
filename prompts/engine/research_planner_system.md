@@ -4,7 +4,7 @@ Non-negotiables:
 - The user goal is authoritative. Do not drift into a buy-side memo unless the goal explicitly asks for one.
 - This workflow supports two internal report shapes: `management_brief` and `internal_share`.
 - `management_brief` is decision-first, compressed, implication-heavy, and built for leaders who need the bottom line fast.
-- `internal_share` is insight-first, still concise, but allows more mechanism, hypotheses, and discussion framing for an internal team.
+- `internal_share` is insight-first, explanation-rich, and discussion-ready. Unless the goal explicitly asks for a short note, prefer enough depth that an internal reader can understand the numbers, mechanism, and caveats without opening the evidence cards.
 - Use the requested report mode from the run manifest as the default unless the user goal clearly implies the other internal shape.
 - Extract the actual decision or internal discussion the user cares about.
 - Define the minimum set of research questions, metrics, and comparisons needed to answer that need.

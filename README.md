@@ -29,9 +29,22 @@ Useful flags:
 python3 scripts/run_pipeline.py   internal   --goal "Compare the current state of tokenized treasuries demand across major crypto venues."   --ticker ONDO   --mode auto   --audience internal_strategy_team   --report-mode auto   --rounds 3   --live-search
 ```
 
+Hard timeout controls (all codex-driven stages):
+
+```bash
+python3 scripts/run_pipeline.py internal --goal "..." --hard-timeout-profile balanced
+python3 scripts/run_pipeline.py internal --goal "..." --hard-timeout-sec 1800
+```
+
+- `--hard-timeout-profile`: `strict | balanced | relaxed` (default `balanced`)
+- `--hard-timeout-sec`: override all stage timeouts with one value
+- `balanced` profile: planning 1200s, source_scout 1500s, evidence 2100s, skeptic 1800s, synthesis 2100s, polish 900s
+- Hard timeout triggers one automatic retry for that stage. If it still times out, the run fails and can be resumed with `--resume`.
+
 Outputs are written to `output/<RUN_ID>/`:
 
 - `run_manifest.json`
+- `feedbacks.txt`
 - `run_events.jsonl`
 - `schema_metrics.json`
 - `data_registry.json`
@@ -53,6 +66,23 @@ Resume a specific run:
 
 ```bash
 python3 scripts/run_pipeline.py internal --resume --run-id 20260309T000000Z_hyperliquid
+```
+
+Feedback-driven round-by-round iteration:
+
+1. Run to a target round (for example `--rounds 1`).
+2. Add feedback to `output/<RUN_ID>/feedbacks.txt`.
+3. Resume with a higher round target (for example `--rounds 2`, then `--rounds 3`).
+
+```bash
+python3 scripts/run_pipeline.py internal --resume --run-id <RUN_ID> --rounds 2
+python3 scripts/run_pipeline.py internal --resume --run-id <RUN_ID> --rounds 3
+```
+
+If feedback should re-shape the research brief itself, add `--replan-on-feedback` on resume:
+
+```bash
+python3 scripts/run_pipeline.py internal --resume --run-id <RUN_ID> --rounds 2 --replan-on-feedback
 ```
 
 Inspect the local data registry without running the full pipeline:

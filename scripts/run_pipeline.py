@@ -18,6 +18,34 @@ OUTPUT_ROOT = ROOT / "output"
 LAST_RUN_ID_PATH = OUTPUT_ROOT / ".last_run_id"
 WORKFLOW_CHOICES = ("internal", "external")
 REPORT_MODE_CHOICES = ("auto", "management_brief", "internal_share")
+DEFAULT_HARD_TIMEOUT_PROFILE = "balanced"
+MAX_STAGE_ATTEMPTS = 2
+HARD_TIMEOUT_PROFILES: dict[str, dict[str, int]] = {
+    "strict": {
+        "planning": 900,
+        "source_scout": 1200,
+        "evidence": 1800,
+        "skeptic": 1500,
+        "synthesis": 1800,
+        "polish": 720,
+    },
+    "balanced": {
+        "planning": 1200,
+        "source_scout": 1500,
+        "evidence": 2100,
+        "skeptic": 1800,
+        "synthesis": 2100,
+        "polish": 900,
+    },
+    "relaxed": {
+        "planning": 1500,
+        "source_scout": 1800,
+        "evidence": 2700,
+        "skeptic": 2400,
+        "synthesis": 2700,
+        "polish": 1200,
+    },
+}
 
 
 def utc_now_iso() -> str:
@@ -162,20 +190,46 @@ def format_event_lines(event: dict[str, Any]) -> list[str]:
                 lines.append(f"  [{mark}] {todo.get('text', '')}")
             return lines
         if item_type == "stage_execution":
+            timeout_value = item.get("hard_timeout_sec")
+            timeout_part = f" timeout={timeout_value}s" if timeout_value else ""
             return [
                 f"[EVENT {now}] item.started | stage={item.get('stage', '')} "
                 f"schema={item.get('schema', '')} search={item.get('search', False)}"
+                f"{timeout_part}"
             ]
         return [f"[EVENT {now}] item.started | id={item.get('id', '')} type={item_type}"]
+
+    if event_type == "item.retry":
+        item = event.get("item", {})
+        if item.get("type", "") == "stage_execution":
+            timeout_part = (
+                f" timeout={item.get('hard_timeout_sec', '')}s elapsed={item.get('elapsed_sec', 0):.1f}s"
+                if item.get("hard_timeout_sec")
+                else ""
+            )
+            return [
+                f"[RETRY {now}] stage={item.get('stage', '')} attempt={item.get('attempt', 0)}/"
+                f"{item.get('max_attempts', 0)} reason={item.get('reason', '')}{timeout_part}"
+            ]
+        return [f"[RETRY {now}] {event_type}"]
 
     if event_type == "item.completed":
         item = event.get("item", {})
         item_type = item.get("type", "")
         if item_type == "stage_execution":
+            attempts_part = ""
+            if item.get("attempt_count"):
+                attempts_part = f" attempts={item.get('attempt_count', 0)}/{item.get('max_attempts', 0)}"
+            timeout_part = ""
+            if item.get("hard_timeout_sec"):
+                timeout_part = (
+                    f" timeout={item.get('hard_timeout_sec', 0)}s"
+                    f" timed_out={item.get('timed_out', False)}"
+                )
             line = (
                 f"[EVENT {now}] item.completed | stage={item.get('stage', '')} "
                 f"status={item.get('status', '')} duration={item.get('duration_sec', 0):.1f}s "
-                f"schema_pass={item.get('schema_pass', False)}"
+                f"schema_pass={item.get('schema_pass', False)}{attempts_part}{timeout_part}"
             )
             if item.get("error"):
                 line += f" error={compact_text(str(item.get('error', '')))}"
@@ -275,6 +329,26 @@ def format_pass_rate(passed: int, attempts: int) -> str:
     return f"{(passed / attempts) * 100:.1f}%"
 
 
+def stage_family_from_key(stage_key: str) -> str:
+    if stage_key.startswith("source_scout_v"):
+        return "source_scout"
+    if stage_key.startswith("evidence_v"):
+        return "evidence"
+    if stage_key.startswith("skeptic_v"):
+        return "skeptic"
+    return stage_key
+
+
+class StageHardTimeoutError(RuntimeError):
+    def __init__(self, *, stage_label: str, timeout_sec: int, elapsed_sec: float):
+        self.stage_label = stage_label
+        self.timeout_sec = timeout_sec
+        self.elapsed_sec = elapsed_sec
+        super().__init__(
+            f"{stage_label} exceeded hard timeout of {timeout_sec}s (elapsed {elapsed_sec:.1f}s)."
+        )
+
+
 def run_codex_exec(
     prompt: str,
     schema_path: Path,
@@ -284,6 +358,7 @@ def run_codex_exec(
     live_search: bool = False,
     stage_label: str | None = None,
     heartbeat_seconds: int = 20,
+    timeout_sec: int | None = None,
     return_meta: bool = False,
 ) -> Any:
     cmd = ["codex", "--ask-for-approval", "never"]
@@ -293,11 +368,14 @@ def run_codex_exec(
     cmd += ["--sandbox", sandbox, "--output-schema", str(schema_path), "--output-last-message", str(out_json_path)]
     cmd += ["-"]
 
+    if out_json_path.exists():
+        out_json_path.unlink()
+
     started = time.perf_counter()
     if stage_label:
         log(
             f"[RUN] {stage_label} | start "
-            f"(schema={schema_path.name}, out={out_json_path.name}, search={live_search})"
+            f"(schema={schema_path.name}, out={out_json_path.name}, search={live_search}, timeout={timeout_sec or 0}s)"
         )
 
     with tempfile.TemporaryFile(mode="w+", encoding="utf-8") as stdout_f, tempfile.TemporaryFile(
@@ -319,16 +397,41 @@ def run_codex_exec(
             except BrokenPipeError:
                 pass
 
+        timed_out = False
+        elapsed_timeout = 0.0
         while proc.poll() is None:
             time.sleep(max(1, heartbeat_seconds))
-            if proc.poll() is None and stage_label:
+            if proc.poll() is None:
                 elapsed = time.perf_counter() - started
-                log(f"[RUN] {stage_label} | still running ({format_duration(elapsed)})")
+                if timeout_sec is not None and elapsed > timeout_sec:
+                    timed_out = True
+                    elapsed_timeout = elapsed
+                    if stage_label:
+                        log(
+                            f"[TIMEOUT] {stage_label} | exceeded hard_timeout={timeout_sec}s "
+                            f"at {format_duration(elapsed)}; terminating"
+                        )
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=10)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                        proc.wait(timeout=10)
+                    break
+                if stage_label:
+                    log(f"[RUN] {stage_label} | still running ({format_duration(elapsed)})")
 
         stdout_f.seek(0)
         stdout = stdout_f.read()
         stderr_f.seek(0)
         stderr = stderr_f.read()
+
+    if timed_out:
+        raise StageHardTimeoutError(
+            stage_label=stage_label or "codex-stage",
+            timeout_sec=int(timeout_sec or 0),
+            elapsed_sec=elapsed_timeout or (time.perf_counter() - started),
+        )
 
     file_raw = out_json_path.read_text(encoding="utf-8") if out_json_path.exists() else ""
     obj = try_parse_json(file_raw)
@@ -868,6 +971,7 @@ def ensure_research_manifest(
     artifacts = {
         "goal": to_relative(run_dir / "goal.txt"),
         "notes": to_relative(run_dir / "notes.txt"),
+        "feedbacks": to_relative(run_dir / "feedbacks.txt"),
         "run_events": to_relative(run_dir / "run_events.jsonl"),
         "schema_metrics": to_relative(run_dir / "schema_metrics.json"),
         "data_registry": to_relative(run_dir / "data_registry.json"),
@@ -924,6 +1028,7 @@ def ensure_research_manifest(
 
     ensure_text_file(run_dir / "goal.txt", f"{goal}\n")
     ensure_text_file(run_dir / "notes.txt", notes_seed)
+    ensure_text_file(run_dir / "feedbacks.txt", "")
     ensure_text_file(run_dir / "run_events.jsonl", "")
     ensure_json_file(run_dir / "schema_metrics.json", new_schema_metrics())
     ensure_json_file(run_dir / "data_registry.json", {"datasets": []})
@@ -1030,13 +1135,38 @@ def render_final_answer_markdown(answer: dict[str, Any]) -> str:
         heading = normalize_space(section.get("heading", "Section"))
         if heading:
             lines.append(f"## {heading}")
+
         evidence_ids = unique_strings(section.get("evidence_ids", []), limit=12)
         if evidence_ids:
             lines.append(f"_Evidence: {', '.join(evidence_ids)}_")
             lines.append("")
-        body = (section.get("body", "") or "").strip()
-        if body:
-            lines.append(body)
+
+        thesis = normalize_space(section.get("thesis", ""))
+        if thesis:
+            lines.append(f"**Thesis:** {thesis}")
+            lines.append("")
+
+        key_metrics = section.get("key_metrics", []) or []
+        if key_metrics:
+            lines.append("**Key Metrics**")
+            for metric in key_metrics:
+                label = normalize_space(metric.get("label", "Metric"))
+                value = normalize_space(metric.get("value", ""))
+                why = normalize_space(metric.get("why_it_matters", ""))
+                metric_line = f"- {label}: {value}"
+                if why:
+                    metric_line += f" | {why}"
+                lines.append(metric_line)
+            lines.append("")
+
+        paragraphs = [normalize_space(p) for p in section.get("paragraphs", []) if normalize_space(p)]
+        if not paragraphs:
+            body = normalize_space(section.get("body", ""))
+            if body:
+                paragraphs = [body]
+
+        for paragraph in paragraphs:
+            lines.append(paragraph)
             lines.append("")
 
     open_gaps = unique_strings(answer.get("open_gaps", []), limit=12)
@@ -1212,11 +1342,41 @@ def generate_workbench(
                 "</article>"
             )
 
-        answer_sections_html = "".join(
-            (
-                "<article class=\"card answer-card\">"
-                f"<div class=\"eyebrow\">{html.escape(section.get('heading', 'Section'))}</div>"
-                f"{render_markdownish(section.get('body', ''))}"
+        answer_sections_html = ""
+        for section in final_answer.get("sections", []):
+            section_heading = html.escape(section.get("heading", "Section"))
+            thesis_html = ""
+            thesis = normalize_space(section.get("thesis", ""))
+            if thesis:
+                thesis_html = f"<p><strong>Thesis:</strong> {html.escape(thesis)}</p>"
+
+            key_metrics_html = ""
+            key_metrics = section.get("key_metrics", []) or []
+            if key_metrics:
+                key_metrics_html = (
+                    "<div class=\"mini-block\"><div class=\"eyebrow\">Key Metrics</div><ul>"
+                    + "".join(
+                        f"<li><strong>{html.escape(normalize_space(metric.get('label', 'Metric')))}</strong>: "
+                        f"{html.escape(normalize_space(metric.get('value', '')))}"
+                        + (
+                            f"<div class=\"meta\">{html.escape(normalize_space(metric.get('why_it_matters', '')))}</div>"
+                            if normalize_space(metric.get("why_it_matters", ""))
+                            else ""
+                        )
+                        + "</li>"
+                        for metric in key_metrics
+                    )
+                    + "</ul></div>"
+                )
+
+            paragraphs = [normalize_space(p) for p in section.get("paragraphs", []) if normalize_space(p)]
+            if not paragraphs:
+                body = normalize_space(section.get("body", ""))
+                if body:
+                    paragraphs = [body]
+            paragraphs_html = "".join(f"<p>{html.escape(p)}</p>" for p in paragraphs)
+
+            evidence_html = (
                 "<div class=\"chips\">"
                 + "".join(
                     f"<a class=\"chip\" href=\"#evidence-{html.escape(evidence_id)}\">{html.escape(evidence_id)}</a>"
@@ -1224,10 +1384,17 @@ def generate_workbench(
                     if evidence_id in evidence_lookup
                 )
                 + "</div>"
+            )
+
+            answer_sections_html += (
+                "<article class=\"card answer-card\">"
+                f"<div class=\"eyebrow\">{section_heading}</div>"
+                f"{thesis_html}"
+                f"{key_metrics_html}"
+                f"{paragraphs_html}"
+                f"{evidence_html}"
                 "</article>"
             )
-            for section in final_answer.get("sections", [])
-        )
         focus_html = ""
         if final_answer.get("decision_or_discussion_need"):
             focus_html = f"<p class=\"meta\"><strong>Decision / Discussion Need:</strong> {html.escape(final_answer.get('decision_or_discussion_need', ''))}</p>"
@@ -1323,6 +1490,13 @@ def generate_workbench(
     .meta {{
       color: var(--muted);
       font-size: 14px;
+    }}
+    .mini-block {{
+      margin: 10px 0 14px;
+      padding: 10px 12px;
+      border: 1px solid #d8d1c4;
+      border-radius: 10px;
+      background: rgba(255,255,255,0.45);
     }}
     .status-grid {{
       display: grid;
@@ -1518,6 +1692,8 @@ def run_research_pipeline(args: argparse.Namespace) -> None:
         run_id = resolve_research_run_id(args, goal, args.ticker)
     mode_resolved = resolve_mode(args.mode, goal, args.ticker)
     report_mode_resolved = resolve_report_mode(args.report_mode, args.audience, goal)
+    if args.rounds is None:
+        args.rounds = 2 if report_mode_resolved == "internal_share" else 1
     run_dir = OUTPUT_ROOT / run_id
     manifest_path, manifest = ensure_research_manifest(
         run_dir,
@@ -1527,17 +1703,69 @@ def run_research_pipeline(args: argparse.Namespace) -> None:
         report_mode_resolved,
         workflow,
     )
+    profile_timeouts = HARD_TIMEOUT_PROFILES[args.hard_timeout_profile]
+    manifest["hard_timeout_profile"] = args.hard_timeout_profile
+    manifest["hard_timeout_override_sec"] = args.hard_timeout_sec
+    save_json(manifest_path, manifest)
+
+    def is_source_scout_payload_valid(payload: dict[str, Any]) -> bool:
+        return (
+            bool(payload)
+            and isinstance(payload.get("sources_added"), list)
+            and isinstance(payload.get("candidate_claims"), list)
+            and isinstance(payload.get("unresolved_gaps"), list)
+        )
+
+    def is_evidence_payload_valid(payload: dict[str, Any]) -> bool:
+        return (
+            bool(payload)
+            and isinstance(payload.get("evidence_cards"), list)
+            and isinstance(payload.get("unresolved_gaps"), list)
+        )
+
+    def is_skeptic_payload_valid(payload: dict[str, Any]) -> bool:
+        return (
+            bool(payload)
+            and isinstance(payload.get("contradictions"), list)
+            and isinstance(payload.get("missing_proof"), list)
+            and isinstance(payload.get("next_queries"), list)
+            and isinstance(payload.get("continue_research"), bool)
+            and isinstance(payload.get("stop_reason"), str)
+        )
+
+    def is_round_complete(round_num: int) -> bool:
+        interim = run_dir / "interim"
+        scout_obj = load_json(interim / f"source_scout_v{round_num}.json", {})
+        evidence_obj = load_json(interim / f"evidence_v{round_num}.json", {})
+        skeptic_obj = load_json(interim / f"skeptic_v{round_num}.json", {})
+        return (
+            is_source_scout_payload_valid(scout_obj)
+            and is_evidence_payload_valid(evidence_obj)
+            and is_skeptic_payload_valid(skeptic_obj)
+        )
+
+    def resolve_stage_timeout(stage_key: str) -> int:
+        if args.hard_timeout_sec is not None:
+            return args.hard_timeout_sec
+        family = stage_family_from_key(stage_key)
+        return profile_timeouts.get(family, profile_timeouts["synthesis"])
+
     prior_current_round = 0
     if args.resume:
         try:
             prior_current_round = int(manifest.get("current_round", 0))
         except (TypeError, ValueError):
             prior_current_round = 0
-    force_resume_additional_rounds = bool(args.resume and args.rounds > prior_current_round)
+    has_incomplete_requested_rounds = bool(
+        args.resume and any(not is_round_complete(round_num) for round_num in range(1, args.rounds + 1))
+    )
+    force_resume_additional_rounds = bool(
+        args.resume and (args.rounds > prior_current_round or has_incomplete_requested_rounds)
+    )
     if force_resume_additional_rounds:
         log(
-            f"[RESUME] requested rounds={args.rounds} exceeds previous current_round={prior_current_round}; "
-            "continuing beyond prior skeptic stop when needed."
+            f"[RESUME] requested rounds={args.rounds}, previous current_round={prior_current_round}, "
+            f"incomplete_requested_rounds={has_incomplete_requested_rounds}; continuing beyond prior skeptic stop when needed."
         )
     research_updated = False
     interim_dir = run_dir / "interim"
@@ -1566,6 +1794,7 @@ def run_research_pipeline(args: argparse.Namespace) -> None:
         save_json(schema_metrics_path, schema_metrics)
 
     event_counter = {"value": 0}
+    stage_execution_meta: dict[str, dict[str, Any]] = {}
 
     def next_item_id(prefix: str) -> str:
         event_counter["value"] += 1
@@ -1582,6 +1811,11 @@ def run_research_pipeline(args: argparse.Namespace) -> None:
             pass_rate=format_pass_rate(totals.get("passed", 0), totals.get("attempts", 0)),
         )
 
+    def with_stage_runtime_meta(stage_key: str, base_meta: dict[str, Any] | None = None) -> dict[str, Any]:
+        merged = dict(base_meta or {})
+        merged.update(stage_execution_meta.get(stage_key, {}))
+        return merged
+
     def run_codex_stage(
         *,
         stage_key: str,
@@ -1592,6 +1826,7 @@ def run_research_pipeline(args: argparse.Namespace) -> None:
         live_search: bool,
         stage_label: str,
     ) -> dict[str, Any]:
+        stage_timeout_sec = resolve_stage_timeout(stage_key)
         item_id = next_item_id("stage")
         emit_event(
             events_path,
@@ -1603,29 +1838,75 @@ def run_research_pipeline(args: argparse.Namespace) -> None:
                 "schema": schema_path.name,
                 "search": bool(live_search),
                 "sandbox": sandbox,
+                "hard_timeout_sec": stage_timeout_sec,
+                "max_attempts": MAX_STAGE_ATTEMPTS,
             },
         )
         started = time.perf_counter()
         passed = False
         error_message = ""
         meta: dict[str, Any] = {}
+        attempt_count = 0
+        timeout_hits = 0
         try:
-            result, meta = run_codex_exec(
-                prompt,
-                schema_path,
-                out_path,
-                sandbox=sandbox,
-                live_search=live_search,
-                stage_label=stage_label,
-                return_meta=True,
-            )
-            passed = True
-            return result
+            while attempt_count < MAX_STAGE_ATTEMPTS:
+                attempt_count += 1
+                attempt_label = f"{stage_label} (attempt {attempt_count}/{MAX_STAGE_ATTEMPTS})"
+                try:
+                    result, meta = run_codex_exec(
+                        prompt,
+                        schema_path,
+                        out_path,
+                        sandbox=sandbox,
+                        live_search=live_search,
+                        stage_label=attempt_label,
+                        timeout_sec=stage_timeout_sec,
+                        return_meta=True,
+                    )
+                    passed = True
+                    error_message = ""
+                    return result
+                except StageHardTimeoutError as exc:
+                    timeout_hits += 1
+                    error_message = str(exc)
+                    if attempt_count < MAX_STAGE_ATTEMPTS:
+                        log(
+                            f"[RETRY] {stage_label} | hard timeout on attempt "
+                            f"{attempt_count}/{MAX_STAGE_ATTEMPTS}; retrying"
+                        )
+                        emit_event(
+                            events_path,
+                            "item.retry",
+                            item={
+                                "id": item_id,
+                                "type": "stage_execution",
+                                "stage": stage_key,
+                                "attempt": attempt_count,
+                                "max_attempts": MAX_STAGE_ATTEMPTS,
+                                "reason": "hard_timeout",
+                                "hard_timeout_sec": stage_timeout_sec,
+                                "elapsed_sec": round(exc.elapsed_sec, 3),
+                                "error": compact_text(str(exc), 240),
+                            },
+                        )
+                        continue
+                    log(
+                        f"[FAILED_AFTER_RETRY] {stage_label} | timed out after "
+                        f"{MAX_STAGE_ATTEMPTS} attempts (timeout={stage_timeout_sec}s)"
+                    )
+                    raise
         except Exception as exc:
             error_message = str(exc)
             raise
         finally:
             duration_sec = time.perf_counter() - started
+            stage_execution_meta[stage_key] = {
+                "attempt_count": attempt_count,
+                "max_attempts": MAX_STAGE_ATTEMPTS,
+                "hard_timeout_sec": stage_timeout_sec,
+                "timed_out": timeout_hits > 0,
+                "timeout_hits": timeout_hits,
+            }
             record_schema_attempt(
                 schema_metrics,
                 stage=stage_key,
@@ -1647,6 +1928,11 @@ def run_research_pipeline(args: argparse.Namespace) -> None:
                     "status": "completed" if passed else "failed",
                     "duration_sec": round(duration_sec, 3),
                     "schema_pass": passed,
+                    "attempt_count": attempt_count,
+                    "max_attempts": MAX_STAGE_ATTEMPTS,
+                    "hard_timeout_sec": stage_timeout_sec,
+                    "timed_out": timeout_hits > 0,
+                    "timeout_hits": timeout_hits,
                     "recovered_stdout": bool(meta.get("recovered_stdout", False)),
                     "error": compact_text(error_message, 240) if error_message else "",
                 },
@@ -1738,14 +2024,17 @@ def run_research_pipeline(args: argparse.Namespace) -> None:
         "<RUN_DIR>": to_relative(run_dir),
         "<GOAL_PATH>": to_relative(run_dir / "goal.txt"),
         "<NOTES_PATH>": to_relative(run_dir / "notes.txt"),
+        "<FEEDBACK_PATH>": to_relative(run_dir / "feedbacks.txt"),
         "<DATA_REGISTRY_PATH>": to_relative(data_registry_path),
         "<MANIFEST_PATH>": to_relative(manifest_path),
     }
 
-    if args.resume and brief_path.exists() and load_json(brief_path, {}):
+    if args.resume and brief_path.exists() and load_json(brief_path, {}) and not args.replan_on_feedback:
         brief = load_json(brief_path, {})
         log(f"[PLAN] resume from {to_relative(brief_path)}")
     else:
+        if args.resume and args.replan_on_feedback:
+            log(f"[PLAN] replan requested via --replan-on-feedback using {to_relative(run_dir / 'feedbacks.txt')}")
         update_manifest_stage(
             manifest_path,
             manifest,
@@ -1779,7 +2068,10 @@ def run_research_pipeline(args: argparse.Namespace) -> None:
             status="completed",
             path=brief_path,
             summary=first_non_empty_line(brief.get("objective_statement", "")) or "Research brief ready.",
-            meta={"questions": len(brief.get("key_questions", [])), "metrics": len(brief.get("metrics", []))},
+            meta=with_stage_runtime_meta(
+                "planning",
+                {"questions": len(brief.get("key_questions", [])), "metrics": len(brief.get("metrics", []))},
+            ),
         )
         save_json(manifest_path, manifest)
 
@@ -1811,6 +2103,7 @@ def run_research_pipeline(args: argparse.Namespace) -> None:
             "<RUN_DIR>": to_relative(run_dir),
             "<ROUND>": str(round_num),
             "<BRIEF_PATH>": to_relative(brief_path),
+            "<FEEDBACK_PATH>": to_relative(run_dir / "feedbacks.txt"),
             "<DATA_REGISTRY_PATH>": to_relative(data_registry_path),
             "<SOURCE_REGISTRY_PATH>": to_relative(source_registry_path),
             "<EVIDENCE_PATH>": to_relative(evidence_cards_path),
@@ -1819,10 +2112,13 @@ def run_research_pipeline(args: argparse.Namespace) -> None:
         }
 
         scout_path = interim_dir / f"source_scout_v{round_num}.json"
-        if args.resume and scout_path.exists():
-            scout_obj = load_json(scout_path, {})
+        existing_scout_obj = load_json(scout_path, {}) if (args.resume and scout_path.exists()) else {}
+        if args.resume and is_source_scout_payload_valid(existing_scout_obj):
+            scout_obj = existing_scout_obj
             log(f"[ROUND {round_num}] source scout resume from {to_relative(scout_path)}")
         else:
+            if args.resume and scout_path.exists():
+                log(f"[ROUND {round_num}] source scout cache invalid; rerunning {to_relative(scout_path)}")
             update_manifest_stage(
                 manifest_path,
                 manifest,
@@ -1862,19 +2158,25 @@ def run_research_pipeline(args: argparse.Namespace) -> None:
             status="completed",
             path=scout_path,
             summary=f"Added {inserted_sources} new sources.",
-            meta={
-                "new_sources": inserted_sources,
-                "total_sources": len(source_registry.get("sources", [])),
-                "new_gaps": inserted_source_gaps,
-            },
+            meta=with_stage_runtime_meta(
+                f"source_scout_v{round_num}",
+                {
+                    "new_sources": inserted_sources,
+                    "total_sources": len(source_registry.get("sources", [])),
+                    "new_gaps": inserted_source_gaps,
+                },
+            ),
         )
         generate_workbench(run_dir, manifest, brief, data_registry, source_registry, evidence_cards, gap_log, final_answer)
 
         evidence_path = interim_dir / f"evidence_v{round_num}.json"
-        if args.resume and evidence_path.exists():
-            evidence_obj = load_json(evidence_path, {})
+        existing_evidence_obj = load_json(evidence_path, {}) if (args.resume and evidence_path.exists()) else {}
+        if args.resume and is_evidence_payload_valid(existing_evidence_obj):
+            evidence_obj = existing_evidence_obj
             log(f"[ROUND {round_num}] evidence resume from {to_relative(evidence_path)}")
         else:
+            if args.resume and evidence_path.exists():
+                log(f"[ROUND {round_num}] evidence cache invalid; rerunning {to_relative(evidence_path)}")
             update_manifest_stage(
                 manifest_path,
                 manifest,
@@ -1915,21 +2217,27 @@ def run_research_pipeline(args: argparse.Namespace) -> None:
             status="completed",
             path=evidence_path,
             summary=f"Added {inserted_evidence} evidence cards.",
-            meta={
-                "new_evidence": inserted_evidence,
-                "total_evidence": len(evidence_cards.get("evidence_cards", [])),
-                "new_gaps": inserted_evidence_gaps,
-            },
+            meta=with_stage_runtime_meta(
+                f"evidence_v{round_num}",
+                {
+                    "new_evidence": inserted_evidence,
+                    "total_evidence": len(evidence_cards.get("evidence_cards", [])),
+                    "new_gaps": inserted_evidence_gaps,
+                },
+            ),
         )
         generate_workbench(run_dir, manifest, brief, data_registry, source_registry, evidence_cards, gap_log, final_answer)
 
         skeptic_path = interim_dir / f"skeptic_v{round_num}.json"
         skeptic_resumed = False
-        if args.resume and skeptic_path.exists():
+        existing_skeptic_obj = load_json(skeptic_path, {}) if (args.resume and skeptic_path.exists()) else {}
+        if args.resume and is_skeptic_payload_valid(existing_skeptic_obj):
             skeptic_resumed = True
-            skeptic_obj = load_json(skeptic_path, {})
+            skeptic_obj = existing_skeptic_obj
             log(f"[ROUND {round_num}] skeptic resume from {to_relative(skeptic_path)}")
         else:
+            if args.resume and skeptic_path.exists():
+                log(f"[ROUND {round_num}] skeptic cache invalid; rerunning {to_relative(skeptic_path)}")
             update_manifest_stage(
                 manifest_path,
                 manifest,
@@ -1983,11 +2291,14 @@ def run_research_pipeline(args: argparse.Namespace) -> None:
             status="completed",
             path=skeptic_path,
             summary="Continue research." if continue_research else "Skeptic sign-off reached.",
-            meta={
-                "new_contradictions": inserted_contradictions,
-                "new_missing_proof": inserted_missing_proof,
-                "continue_research": continue_research,
-            },
+            meta=with_stage_runtime_meta(
+                f"skeptic_v{round_num}",
+                {
+                    "new_contradictions": inserted_contradictions,
+                    "new_missing_proof": inserted_missing_proof,
+                    "continue_research": continue_research,
+                },
+            ),
         )
         last_skeptic_path = skeptic_path
         generate_workbench(run_dir, manifest, brief, data_registry, source_registry, evidence_cards, gap_log, final_answer)
@@ -2058,7 +2369,7 @@ def run_research_pipeline(args: argparse.Namespace) -> None:
             status="completed",
             path=draft_answer_path,
             summary=first_non_empty_line(draft_answer.get("summary", "")) or "Draft answer ready.",
-            meta={"sections": len(draft_answer.get("sections", []))},
+            meta=with_stage_runtime_meta("synthesis", {"sections": len(draft_answer.get("sections", []))}),
         )
 
     draft_mtime = draft_answer_path.stat().st_mtime if draft_answer_path.exists() else 0.0
@@ -2105,7 +2416,7 @@ def run_research_pipeline(args: argparse.Namespace) -> None:
             status="completed",
             path=final_answer_json_path,
             summary=first_non_empty_line(final_answer.get("summary", "")) or "Final answer ready.",
-            meta={"sections": len(final_answer.get("sections", []))},
+            meta=with_stage_runtime_meta("polish", {"sections": len(final_answer.get("sections", []))}),
         )
 
     final_answer_md_path.write_text(render_final_answer_markdown(final_answer), encoding="utf-8")
@@ -2149,14 +2460,36 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--live-search", action="store_true", help="enable live web search where supported")
     parser.add_argument("--resume", action="store_true", help="resume from the last or specified run")
     parser.add_argument("--run-id", help="resume or force a specific run id for research mode")
-    parser.add_argument("--rounds", type=int, default=1, help="max research rounds")
+    parser.add_argument(
+        "--replan-on-feedback",
+        action="store_true",
+        help="rebuild planning brief on resume using output/<RUN_ID>/feedbacks.txt",
+    )
+    parser.add_argument(
+        "--rounds",
+        type=int,
+        help="max research rounds; default: 1 for management_brief, 2 for internal_share",
+    )
+    parser.add_argument(
+        "--hard-timeout-profile",
+        choices=tuple(HARD_TIMEOUT_PROFILES.keys()),
+        default=DEFAULT_HARD_TIMEOUT_PROFILE,
+        help="per-stage hard timeout profile: strict, balanced, or relaxed",
+    )
+    parser.add_argument(
+        "--hard-timeout-sec",
+        type=int,
+        help="override hard timeout seconds for all codex-driven stages",
+    )
     return parser
 
 
 def main() -> None:
     args = build_parser().parse_args()
-    if args.rounds < 1:
+    if args.rounds is not None and args.rounds < 1:
         raise SystemExit("--rounds must be >= 1")
+    if args.hard_timeout_sec is not None and args.hard_timeout_sec < 1:
+        raise SystemExit("--hard-timeout-sec must be >= 1")
 
     try:
         run_research_pipeline(args)

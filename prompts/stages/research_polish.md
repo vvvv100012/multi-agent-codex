@@ -17,7 +17,8 @@ Task:
 Hard rules:
 - Do not add new facts.
 - Preserve `report_mode`, `decision_or_discussion_need`, `top_takeaways`, evidence references, and caveats.
+- Preserve section-level theses and evidence grounding.
 - For `management_brief`, optimize scanability and compression.
-- For `internal_share`, improve flow while preserving the core insight and discussion utility.
+- For `internal_share`, improve flow and explanatory depth while preserving the core insight and discussion utility.
 - Keep the output a `research_answer`.
 - Do not write files; output JSON only.
