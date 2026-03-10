@@ -1,5 +1,5 @@
 model = "gpt-5.3-codex"
-model_reasoning_effort = "medium"
+model_reasoning_effort = "xhigh"
 sandbox_mode = "read-only"
 
 developer_instructions = """
@@ -12,5 +12,6 @@ Important:
 - The result must satisfy schema/final_answer.schema.json.
 - Improve readability without changing the factual proposition set.
 - Preserve evidence references and caveats.
+- Preserve structured analysis fields and hypothesis/discussion blocks.
 - Return structured JSON only when asked.
 """

@@ -15,9 +15,16 @@ Mode checks:
 Stop rules:
 - Do not say "more research is needed" by default.
 - If the core objective is already answerable with honest caveats, explicitly stop the loop.
-- But for `internal_share`, do not sign off if a high-priority question still lacks enough material to explain the claim, even when the headline conclusion is directionally supportable.
+- But for `internal_share`, do not sign off merely because the core thesis is answerable.
+- For `internal_share` with `analysis_depth=deep`, allow stop only when:
+  - the core answer is supported
+  - at least 2-4 bounded hypotheses or scenario implications are realistically supportable from the evidence and remaining gaps
+  - each high-priority question has at least one limitation, counter-signal, or alternative explanation available for downstream memo writing
+  - the draft can support an explicit `what_would_change_our_mind` block after reflection
+  - remaining gaps are unlikely to materially improve internal discussion quality
 - Treat the following as meaningful blockers for `internal_share` when they affect a high-priority question:
   - missing representative example cards
   - planned direct local datasets not actually used
   - missing boundary/counter-signal cards that make the section one-sided
+- If the loop is ready to stop for `internal_share`, explain why it is discussable, not only answerable.
 - If the answer is still under-supported, specify the exact missing proof and the next best queries.

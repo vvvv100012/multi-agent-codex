@@ -2,12 +2,17 @@
 
 This project is a goal-driven workflow that turns a plain-language research objective into:
 
-`research_brief -> source_registry -> evidence_cards -> gap_log -> final_answer -> workbench`
+`research_brief -> source_registry -> evidence_cards -> gap_log -> synthesis -> reflection -> final_answer -> workbench`
 
 The system is still **internal-first**. It now supports two internal report shapes while keeping the same research pipeline and final JSON/Markdown artifacts:
 
 - `management_brief`: decision-first, compressed, implication-heavy
 - `internal_share`: insight-first, mechanism-aware, discussion-friendly
+
+Brief defaults:
+
+- `management_brief` -> `analysis_depth=standard`, `allow_hypotheses=false`
+- `internal_share` -> `analysis_depth=deep`, `allow_hypotheses=true`
 
 ### Research mode
 
@@ -38,7 +43,7 @@ python3 scripts/run_pipeline.py internal --goal "..." --hard-timeout-sec 1800
 
 - `--hard-timeout-profile`: `strict | balanced | relaxed` (default `balanced`)
 - `--hard-timeout-sec`: override all stage timeouts with one value
-- `balanced` profile: planning 1200s, source_scout 1500s, evidence 2100s, skeptic 1800s, synthesis 2100s, polish 900s
+- `balanced` profile: planning 1200s, source_scout 1500s, evidence 2100s, skeptic 1800s, synthesis 2100s, reflection 1800s, polish 900s
 - Hard timeout triggers one automatic retry for that stage. If it still times out, the run fails and can be resumed with `--resume`.
 
 Outputs are written to `output/<RUN_ID>/`:
@@ -52,6 +57,8 @@ Outputs are written to `output/<RUN_ID>/`:
 - `source_registry.json`
 - `evidence_cards.json`
 - `gap_log.json`
+- `final_answer_draft.json`
+- `final_answer_reflection.json`
 - `final_answer.json`
 - `final_answer.md`
 - `workbench.html`
@@ -97,8 +104,10 @@ python3 scripts/build_data_registry.py --output output/data_registry_preview.jso
 - Only `internal` is implemented today. `external` remains reserved for a future public-facing workflow.
 - The default workflow is goal-driven, not ticker-driven.
 - The final deliverable stays `research_answer`, but it is now shaped as either a `management_brief` or an `internal_share`.
-- The multi-agent team is `planner / scope_guard / research_scout / data_extractor / skeptic / synthesizer / editor`.
+- The internal pipeline is `planner -> scout -> evidence -> skeptic -> synthesis -> reflection -> polish`.
+- The multi-agent team is `planner / scope_guard / research_scout / data_extractor / skeptic / synthesizer / reflection / editor`.
 - The workflow assumes you precompute datasets into `data/` ahead of time.
 - `data_registry.json` is generated from `data/` and tells agents which local files exist, what structure they have, and how they should be used.
 - Local datasets are indexed into `source_registry.json` as `Data` sources so agents can cite them directly and use web search mainly for context or validation.
+- `internal_share` now produces a true internal memo shape with section-level `analysis_moves`, plus structured `working_hypotheses`, `discussion_questions`, `what_would_change_our_mind`, and `watch_items`.
 - `workbench.html` is a static local page that visualizes the run, sources, evidence, gaps, and final answer.

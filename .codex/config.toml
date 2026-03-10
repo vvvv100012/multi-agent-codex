@@ -33,6 +33,10 @@ config_file = "agents/skeptic.toml"
 description = "Synthesizer - answers the user objective directly for the stated internal audience"
 config_file = "agents/synthesizer.toml"
 
+[agents.reflection]
+description = "Reflection - turns evidence-backed answers into bounded internal hypotheses and discussion prompts"
+config_file = "agents/reflection.toml"
+
 [agents.editor]
 description = "Editor - polishes the final answer without changing facts"
 config_file = "agents/editor.toml"

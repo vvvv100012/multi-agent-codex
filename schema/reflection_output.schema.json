@@ -1,0 +1,112 @@
+{
+  "type": "object",
+  "properties": {
+    "run_id": {
+      "type": "string"
+    },
+    "report_mode": {
+      "type": "string",
+      "enum": [
+        "management_brief",
+        "internal_share"
+      ]
+    },
+    "analysis_depth": {
+      "type": "string",
+      "enum": [
+        "standard",
+        "deep"
+      ]
+    },
+    "allow_hypotheses": {
+      "type": "boolean"
+    },
+    "working_hypotheses": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "hypothesis": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string",
+            "enum": [
+              "supported_inference",
+              "plausible_hypothesis"
+            ]
+          },
+          "why_plausible": {
+            "type": "string"
+          },
+          "evidence_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "gap_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "confidence": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ]
+          },
+          "what_would_change_my_mind": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "hypothesis",
+          "label",
+          "why_plausible",
+          "evidence_ids",
+          "gap_ids",
+          "confidence",
+          "what_would_change_my_mind"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "discussion_questions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "what_would_change_our_mind": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "watch_items": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "run_id",
+    "report_mode",
+    "analysis_depth",
+    "allow_hypotheses",
+    "working_hypotheses",
+    "discussion_questions",
+    "what_would_change_our_mind",
+    "watch_items"
+  ],
+  "additionalProperties": false
+}

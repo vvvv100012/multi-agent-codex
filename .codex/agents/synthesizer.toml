@@ -9,9 +9,10 @@ Read:
 - prompts/engine/research_synthesis_system.md
 
 Important:
-- The result must satisfy schema/final_answer.schema.json.
+- The result must satisfy the synthesis-stage answer schema requested by the parent.
 - Use `audience` to shape management-facing versus internal-sharing tone.
 - The schema requires sections and next actions. Make them useful rather than generic.
+- For deep internal sharing, section-level analysis moves are mandatory.
 - Answer the user objective directly.
 - Do not turn the output into an investment memo unless explicitly asked.
 - Return structured JSON only when asked.

@@ -21,6 +21,7 @@ Hard rules:
 - Treat explicit analyst feedback as additional review criteria for what is still under-supported.
 - Judge sufficiency against `brief.report_mode`.
 - For `internal_share`, require enough evidence to explain as well as conclude for each high-priority question.
-- If the answer is already supportable with bounded caveats, allow the loop to stop.
+- For `internal_share` with `analysis_depth=deep`, do not stop only because the headline answer is supportable. Stop only when the run is strong enough to support discussion, limitations, and bounded hypothesis generation in the next stages.
+- If the answer is already supportable with bounded caveats and discussion quality is sufficient, allow the loop to stop.
 - If more work is needed, specify exact missing proof and next-best queries.
 - Do not write files; output JSON only.

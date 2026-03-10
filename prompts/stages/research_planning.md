@@ -18,6 +18,9 @@ Hard rules:
 - Use the local data registry to understand which precomputed datasets already exist.
 - Do not plan around running collectors or fetching local data; assume `data/` is the available local evidence base.
 - Respect the requested audience and requested report mode in the run manifest unless the user goal clearly implies the other internal mode.
+- Set `analysis_depth` and `allow_hypotheses` explicitly in the brief:
+  - `management_brief` defaults to `analysis_depth=standard`, `allow_hypotheses=false`
+  - `internal_share` defaults to `analysis_depth=deep`, `allow_hypotheses=true`
 - If `planner` and `scope_guard` disagree, prefer `scope_guard` on scope boundaries, report mode, and deliverable shape; prefer `planner` on question decomposition and metrics.
 - The user objective is the priority.
 - If the feedback file includes corrections or newly prioritized questions, incorporate them into question priority and metric focus.

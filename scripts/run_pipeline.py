@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
 import argparse
 import html
 import json
@@ -27,6 +29,7 @@ HARD_TIMEOUT_PROFILES: dict[str, dict[str, int]] = {
         "evidence": 1800,
         "skeptic": 1500,
         "synthesis": 1800,
+        "reflection": 1500,
         "polish": 720,
     },
     "balanced": {
@@ -35,6 +38,7 @@ HARD_TIMEOUT_PROFILES: dict[str, dict[str, int]] = {
         "evidence": 2100,
         "skeptic": 1800,
         "synthesis": 2100,
+        "reflection": 1800,
         "polish": 900,
     },
     "relaxed": {
@@ -43,6 +47,7 @@ HARD_TIMEOUT_PROFILES: dict[str, dict[str, int]] = {
         "evidence": 2700,
         "skeptic": 2400,
         "synthesis": 2700,
+        "reflection": 2400,
         "polish": 1200,
     },
 }
@@ -336,6 +341,8 @@ def stage_family_from_key(stage_key: str) -> str:
         return "evidence"
     if stage_key.startswith("skeptic_v"):
         return "skeptic"
+    if stage_key == "reflection":
+        return "reflection"
     return stage_key
 
 
@@ -948,6 +955,180 @@ def merge_next_queries(gap_log: dict[str, Any], next_queries: list[str]) -> dict
     return gap_log
 
 
+def default_analysis_depth(report_mode: str) -> str:
+    return "deep" if report_mode == "internal_share" else "standard"
+
+
+def default_allow_hypotheses(report_mode: str) -> bool:
+    return report_mode == "internal_share"
+
+
+def hydrate_brief_defaults(
+    brief: dict[str, Any],
+    *,
+    fallback_report_mode: str = "management_brief",
+) -> tuple[dict[str, Any], bool]:
+    changed = False
+    report_mode = normalize_space(str(brief.get("report_mode", "")))
+    if report_mode not in {"management_brief", "internal_share"}:
+        report_mode = fallback_report_mode if fallback_report_mode in {"management_brief", "internal_share"} else "management_brief"
+        brief["report_mode"] = report_mode
+        changed = True
+
+    analysis_depth = normalize_space(str(brief.get("analysis_depth", "")))
+    if analysis_depth not in {"standard", "deep"}:
+        brief["analysis_depth"] = default_analysis_depth(report_mode)
+        changed = True
+
+    allow_hypotheses = brief.get("allow_hypotheses")
+    if not isinstance(allow_hypotheses, bool):
+        brief["allow_hypotheses"] = default_allow_hypotheses(report_mode)
+        changed = True
+
+    return brief, changed
+
+
+def ensure_answer_defaults(answer: dict[str, Any], brief: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+    changed = False
+    report_mode = normalize_space(str(answer.get("report_mode", ""))) or normalize_space(str(brief.get("report_mode", "")))
+    if report_mode not in {"management_brief", "internal_share"}:
+        report_mode = "management_brief"
+    if answer.get("report_mode") != report_mode:
+        answer["report_mode"] = report_mode
+        changed = True
+
+    analysis_depth = normalize_space(str(answer.get("analysis_depth", "")))
+    if analysis_depth not in {"standard", "deep"}:
+        answer["analysis_depth"] = normalize_space(str(brief.get("analysis_depth", ""))) or default_analysis_depth(report_mode)
+        changed = True
+
+    for key in ("working_hypotheses", "discussion_questions", "what_would_change_our_mind", "watch_items", "open_gaps", "next_actions"):
+        if not isinstance(answer.get(key), list):
+            answer[key] = []
+            changed = True
+
+    return answer, changed
+
+
+def is_non_empty_string_list(value: Any, *, min_items: int = 0) -> bool:
+    if not isinstance(value, list):
+        return False
+    cleaned = [normalize_space(str(item)) for item in value if normalize_space(str(item))]
+    return len(cleaned) >= min_items
+
+
+def is_analysis_moves_valid(moves: Any, *, deep_required: bool) -> bool:
+    if not isinstance(moves, dict):
+        return not deep_required
+    required_keys = (
+        "what_the_data_says",
+        "interpretation",
+        "alternative_explanations_or_limits",
+        "implication_or_discussion_hook",
+    )
+    for key in required_keys:
+        if not is_non_empty_string_list(moves.get(key), min_items=1 if deep_required else 0):
+            return False
+    return True
+
+
+def is_final_answer_payload_valid(payload: dict[str, Any], *, require_reflection: bool) -> bool:
+    if not payload:
+        return False
+    if not isinstance(payload.get("run_id"), str):
+        return False
+    report_mode = normalize_space(str(payload.get("report_mode", "")))
+    analysis_depth = normalize_space(str(payload.get("analysis_depth", "")))
+    if report_mode not in {"management_brief", "internal_share"}:
+        return False
+    if analysis_depth not in {"standard", "deep"}:
+        return False
+    if not all(isinstance(payload.get(key), str) for key in ("title", "decision_or_discussion_need", "summary")):
+        return False
+    if not isinstance(payload.get("top_takeaways"), list):
+        return False
+    sections = payload.get("sections")
+    if not isinstance(sections, list) or not sections:
+        return False
+    for section in sections:
+        if not isinstance(section, dict):
+            return False
+        if not all(isinstance(section.get(key), str) for key in ("heading", "thesis")):
+            return False
+        if not is_non_empty_string_list(section.get("paragraphs"), min_items=1):
+            return False
+        if not isinstance(section.get("key_metrics"), list):
+            return False
+        if not isinstance(section.get("evidence_ids"), list):
+            return False
+        deep_required = report_mode == "internal_share" and analysis_depth == "deep"
+        if deep_required and not is_analysis_moves_valid(section.get("analysis_moves"), deep_required=True):
+            return False
+
+    if not all(isinstance(payload.get(key), list) for key in ("working_hypotheses", "discussion_questions", "what_would_change_our_mind", "watch_items", "open_gaps", "next_actions")):
+        return False
+
+    if report_mode == "internal_share" and analysis_depth == "deep":
+        if not (6 <= len(sections) <= 8):
+            return False
+        if require_reflection:
+            if not (2 <= len(payload.get("working_hypotheses", [])) <= 8):
+                return False
+            if not (3 <= len(payload.get("discussion_questions", [])) <= 5):
+                return False
+            if len(payload.get("what_would_change_our_mind", [])) < 1:
+                return False
+    return True
+
+
+def is_reflection_payload_valid(payload: dict[str, Any]) -> bool:
+    if not payload:
+        return False
+    if not isinstance(payload.get("run_id"), str):
+        return False
+    if normalize_space(str(payload.get("report_mode", ""))) not in {"management_brief", "internal_share"}:
+        return False
+    if normalize_space(str(payload.get("analysis_depth", ""))) not in {"standard", "deep"}:
+        return False
+    if not isinstance(payload.get("allow_hypotheses"), bool):
+        return False
+    if not all(isinstance(payload.get(key), list) for key in ("working_hypotheses", "discussion_questions", "what_would_change_our_mind", "watch_items")):
+        return False
+    return True
+
+
+def merge_reflection_into_answer(answer: dict[str, Any], reflection: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(answer)
+    hypothesis_seen: set[str] = set()
+    hypotheses: list[dict[str, Any]] = []
+    for item in list(answer.get("working_hypotheses", [])) + list(reflection.get("working_hypotheses", [])):
+        if not isinstance(item, dict):
+            continue
+        hypothesis = normalize_space(str(item.get("hypothesis", "")))
+        if not hypothesis:
+            continue
+        key = hypothesis.lower()
+        if key in hypothesis_seen:
+            continue
+        hypothesis_seen.add(key)
+        hypotheses.append(item)
+
+    merged["working_hypotheses"] = hypotheses
+    merged["discussion_questions"] = unique_strings(
+        list(answer.get("discussion_questions", [])) + list(reflection.get("discussion_questions", [])),
+        limit=8,
+    )
+    merged["what_would_change_our_mind"] = unique_strings(
+        list(answer.get("what_would_change_our_mind", [])) + list(reflection.get("what_would_change_our_mind", [])),
+        limit=12,
+    )
+    merged["watch_items"] = unique_strings(
+        list(answer.get("watch_items", [])) + list(reflection.get("watch_items", [])),
+        limit=12,
+    )
+    return merged
+
+
 def ensure_research_manifest(
     run_dir: Path,
     args: argparse.Namespace,
@@ -979,6 +1160,8 @@ def ensure_research_manifest(
         "source_registry": to_relative(run_dir / "source_registry.json"),
         "evidence_cards": to_relative(run_dir / "evidence_cards.json"),
         "gap_log": to_relative(run_dir / "gap_log.json"),
+        "final_answer_draft": to_relative(run_dir / "final_answer_draft.json"),
+        "final_answer_reflection": to_relative(run_dir / "final_answer_reflection.json"),
         "final_answer_json": to_relative(run_dir / "final_answer.json"),
         "final_answer_markdown": to_relative(run_dir / "final_answer.md"),
         "workbench": to_relative(run_dir / "workbench.html"),
@@ -1035,6 +1218,8 @@ def ensure_research_manifest(
     ensure_json_file(run_dir / "source_registry.json", {"sources": []})
     ensure_json_file(run_dir / "evidence_cards.json", {"evidence_cards": []})
     ensure_json_file(run_dir / "gap_log.json", {"gaps": [], "contradictions": [], "next_queries": []})
+    ensure_json_file(run_dir / "final_answer_draft.json", {})
+    ensure_json_file(run_dir / "final_answer_reflection.json", {})
 
     save_json(manifest_path, manifest)
     remember_last_run_id(run_dir.name)
@@ -1112,8 +1297,12 @@ def render_final_answer_markdown(answer: dict[str, Any]) -> str:
     lines = [f"# {answer.get('title', 'Research Answer')}", ""]
 
     report_mode = normalize_space(answer.get("report_mode", ""))
+    analysis_depth = normalize_space(answer.get("analysis_depth", ""))
     if report_mode:
-        lines.extend([f"_Report mode: {report_mode}_", ""])
+        mode_line = f"_Report mode: {report_mode}_"
+        if analysis_depth:
+            mode_line = f"_Report mode: {report_mode} | Analysis depth: {analysis_depth}_"
+        lines.extend([mode_line, ""])
 
     focus = normalize_space(answer.get("decision_or_discussion_need", ""))
     if focus:
@@ -1169,10 +1358,78 @@ def render_final_answer_markdown(answer: dict[str, Any]) -> str:
             lines.append(paragraph)
             lines.append("")
 
+        analysis_moves = section.get("analysis_moves", {}) if isinstance(section.get("analysis_moves"), dict) else {}
+        move_labels = (
+            ("what_the_data_says", "What The Data Says"),
+            ("interpretation", "Interpretation"),
+            ("alternative_explanations_or_limits", "Alternative Explanations Or Limits"),
+            ("implication_or_discussion_hook", "Implication Or Discussion Hook"),
+        )
+        for key, label in move_labels:
+            entries = [normalize_space(item) for item in analysis_moves.get(key, []) if normalize_space(item)]
+            if not entries:
+                continue
+            lines.append(f"**{label}**")
+            for item in entries:
+                lines.append(item)
+                lines.append("")
+
     open_gaps = unique_strings(answer.get("open_gaps", []), limit=12)
     if open_gaps:
         lines.append("## Open Gaps")
         for item in open_gaps:
+            lines.append(f"- {item}")
+        lines.append("")
+
+    working_hypotheses = answer.get("working_hypotheses", []) or []
+    if working_hypotheses:
+        lines.append("## Working Hypotheses")
+        for item in working_hypotheses:
+            hypothesis = normalize_space(item.get("hypothesis", ""))
+            if hypothesis:
+                lines.append(f"### {hypothesis}")
+            label = normalize_space(item.get("label", ""))
+            confidence = normalize_space(item.get("confidence", ""))
+            why_plausible = normalize_space(item.get("why_plausible", ""))
+            if label or confidence:
+                lines.append(f"_Label: {label or 'n/a'} | Confidence: {confidence or 'n/a'}_")
+                lines.append("")
+            if why_plausible:
+                lines.append(why_plausible)
+                lines.append("")
+            evidence_ids = unique_strings(item.get("evidence_ids", []), limit=12)
+            if evidence_ids:
+                lines.append(f"_Evidence: {', '.join(evidence_ids)}_")
+                lines.append("")
+            gap_ids = unique_strings(item.get("gap_ids", []), limit=12)
+            if gap_ids:
+                lines.append(f"_Gaps: {', '.join(gap_ids)}_")
+                lines.append("")
+            change_items = unique_strings(item.get("what_would_change_my_mind", []), limit=8)
+            if change_items:
+                lines.append("**What Would Change My Mind**")
+                for change_item in change_items:
+                    lines.append(f"- {change_item}")
+                lines.append("")
+
+    what_would_change = unique_strings(answer.get("what_would_change_our_mind", []), limit=12)
+    if what_would_change:
+        lines.append("## What Would Change Our Mind")
+        for item in what_would_change:
+            lines.append(f"- {item}")
+        lines.append("")
+
+    discussion_questions = unique_strings(answer.get("discussion_questions", []), limit=8)
+    if discussion_questions:
+        lines.append("## Discussion Questions")
+        for item in discussion_questions:
+            lines.append(f"- {item}")
+        lines.append("")
+
+    watch_items = unique_strings(answer.get("watch_items", []), limit=12)
+    if watch_items:
+        lines.append("## Watch Items")
+        for item in watch_items:
             lines.append(f"- {item}")
         lines.append("")
 
@@ -1326,6 +1583,8 @@ def generate_workbench(
     gap_section_html = contradiction_html + gap_cards_html or "<div class=\"empty\">No open gaps yet.</div>"
 
     brief_report_mode = brief.get("report_mode", manifest.get("report_mode_resolved", ""))
+    brief_analysis_depth = brief.get("analysis_depth", "")
+    brief_allow_hypotheses = brief.get("allow_hypotheses")
     brief_focus = brief.get("decision_or_discussion_need", "")
 
     if final_answer:
@@ -1376,6 +1635,25 @@ def generate_workbench(
                     paragraphs = [body]
             paragraphs_html = "".join(f"<p>{html.escape(p)}</p>" for p in paragraphs)
 
+            analysis_moves = section.get("analysis_moves", {}) if isinstance(section.get("analysis_moves"), dict) else {}
+            analysis_moves_html = ""
+            move_labels = (
+                ("what_the_data_says", "What The Data Says"),
+                ("interpretation", "Interpretation"),
+                ("alternative_explanations_or_limits", "Alternative Explanations Or Limits"),
+                ("implication_or_discussion_hook", "Implication Or Discussion Hook"),
+            )
+            for key, label in move_labels:
+                entries = [normalize_space(item) for item in analysis_moves.get(key, []) if normalize_space(item)]
+                if not entries:
+                    continue
+                analysis_moves_html += (
+                    "<div class=\"mini-block\">"
+                    f"<div class=\"eyebrow\">{html.escape(label)}</div>"
+                    + "".join(f"<p>{html.escape(item)}</p>" for item in entries)
+                    + "</div>"
+                )
+
             evidence_html = (
                 "<div class=\"chips\">"
                 + "".join(
@@ -1392,21 +1670,89 @@ def generate_workbench(
                 f"{thesis_html}"
                 f"{key_metrics_html}"
                 f"{paragraphs_html}"
+                f"{analysis_moves_html}"
                 f"{evidence_html}"
                 "</article>"
+            )
+        hypotheses_html = ""
+        working_hypotheses = final_answer.get("working_hypotheses", []) or []
+        if working_hypotheses:
+            hypotheses_html = "".join(
+                (
+                    "<article class=\"card answer-card\">"
+                    f"<div class=\"eyebrow\">{html.escape(normalize_space(item.get('label', 'working_hypothesis')))}"
+                    f" · {html.escape(normalize_space(item.get('confidence', '')) or 'n/a')}</div>"
+                    f"<h3>{html.escape(normalize_space(item.get('hypothesis', 'Working hypothesis')))}</h3>"
+                    f"<p>{html.escape(normalize_space(item.get('why_plausible', '')))}</p>"
+                    + (
+                        "<div class=\"chips\">"
+                        + "".join(
+                            f"<a class=\"chip\" href=\"#evidence-{html.escape(evidence_id)}\">{html.escape(evidence_id)}</a>"
+                            for evidence_id in item.get("evidence_ids", [])
+                            if evidence_id in evidence_lookup
+                        )
+                        + "".join(
+                            f"<span class=\"chip\">{html.escape(gap_id)}</span>"
+                            for gap_id in item.get("gap_ids", [])
+                        )
+                        + "</div>"
+                        if item.get("evidence_ids") or item.get("gap_ids")
+                        else ""
+                    )
+                    + (
+                        "<div class=\"mini-block\"><div class=\"eyebrow\">What Would Change My Mind</div><ul>"
+                        + "".join(
+                            f"<li>{html.escape(change_item)}</li>"
+                            for change_item in item.get("what_would_change_my_mind", [])
+                            if normalize_space(change_item)
+                        )
+                        + "</ul></div>"
+                        if any(normalize_space(change_item) for change_item in item.get("what_would_change_my_mind", []))
+                        else ""
+                    )
+                    + "</article>"
+                )
+                for item in working_hypotheses
+            )
+        discussion_html = ""
+        discussion_questions = unique_strings(final_answer.get("discussion_questions", []), limit=8)
+        if discussion_questions:
+            discussion_html += (
+                "<article class=\"card answer-card\">"
+                "<div class=\"eyebrow\">Discussion Questions</div><ul>"
+                + "".join(f"<li>{html.escape(item)}</li>" for item in discussion_questions)
+                + "</ul></article>"
+            )
+        what_change_items = unique_strings(final_answer.get("what_would_change_our_mind", []), limit=12)
+        if what_change_items:
+            discussion_html += (
+                "<article class=\"card answer-card\">"
+                "<div class=\"eyebrow\">What Would Change Our Mind</div><ul>"
+                + "".join(f"<li>{html.escape(item)}</li>" for item in what_change_items)
+                + "</ul></article>"
+            )
+        watch_items = unique_strings(final_answer.get("watch_items", []), limit=12)
+        if watch_items:
+            discussion_html += (
+                "<article class=\"card answer-card\">"
+                "<div class=\"eyebrow\">Watch Items</div><ul>"
+                + "".join(f"<li>{html.escape(item)}</li>" for item in watch_items)
+                + "</ul></article>"
             )
         focus_html = ""
         if final_answer.get("decision_or_discussion_need"):
             focus_html = f"<p class=\"meta\"><strong>Decision / Discussion Need:</strong> {html.escape(final_answer.get('decision_or_discussion_need', ''))}</p>"
         final_answer_html = (
             "<article class=\"card answer-hero\">"
-            f"<div class=\"eyebrow\">Final Answer · {html.escape(manifest.get('status', 'running'))} · {html.escape(final_answer.get('report_mode', brief_report_mode or ''))}</div>"
+            f"<div class=\"eyebrow\">Final Answer · {html.escape(manifest.get('status', 'running'))} · {html.escape(final_answer.get('report_mode', brief_report_mode or ''))} · {html.escape(normalize_space(final_answer.get('analysis_depth', '')) or normalize_space(brief_analysis_depth) or 'standard')}</div>"
             f"<h2>{html.escape(final_answer.get('title', 'Research Answer'))}</h2>"
             f"{focus_html}"
             f"{render_markdownish(final_answer.get('summary', ''))}"
             "</article>"
             + takeaways_html
             + answer_sections_html
+            + hypotheses_html
+            + discussion_html
         )
     else:
         final_answer_html = "<div class=\"empty\">Final answer has not been generated yet.</div>"
@@ -1626,6 +1972,8 @@ def generate_workbench(
           <h2 class="section-title">{html.escape(brief.get('research_angle', 'Research Brief'))}</h2>
           <p>{html.escape(brief.get('objective_statement', 'Research brief not generated yet.'))}</p>
           <p class="meta">Report mode: {html.escape(brief_report_mode or 'unresolved')}</p>
+          <p class="meta">Analysis depth: {html.escape(normalize_space(str(brief_analysis_depth)) or 'unresolved')}</p>
+          <p class="meta">Allow hypotheses: {html.escape(str(brief_allow_hypotheses))}</p>
           <p class="meta">Decision / Discussion Need: {html.escape(brief_focus or 'Not resolved yet.')}</p>
           <div class="card-grid">
             <div class="card">
@@ -1733,6 +2081,12 @@ def run_research_pipeline(args: argparse.Namespace) -> None:
             and isinstance(payload.get("stop_reason"), str)
         )
 
+    def is_synthesis_draft_valid(payload: dict[str, Any]) -> bool:
+        return is_final_answer_payload_valid(payload, require_reflection=False)
+
+    def is_final_output_valid(payload: dict[str, Any]) -> bool:
+        return is_final_answer_payload_valid(payload, require_reflection=True)
+
     def is_round_complete(round_num: int) -> bool:
         interim = run_dir / "interim"
         scout_obj = load_json(interim / f"source_scout_v{round_num}.json", {})
@@ -1778,6 +2132,7 @@ def run_research_pipeline(args: argparse.Namespace) -> None:
     final_answer_json_path = run_dir / "final_answer.json"
     final_answer_md_path = run_dir / "final_answer.md"
     draft_answer_path = run_dir / "final_answer_draft.json"
+    reflection_answer_path = run_dir / "final_answer_reflection.json"
     events_path = run_dir / "run_events.jsonl"
     schema_metrics_path = run_dir / "schema_metrics.json"
 
@@ -1956,7 +2311,7 @@ def run_research_pipeline(args: argparse.Namespace) -> None:
             "items": [
                 {"text": "Index local data and build data registry", "completed": False},
                 {"text": "Run planning and multi-round source/evidence/skeptic loop", "completed": False},
-                {"text": "Synthesize and polish final structured answer", "completed": False},
+                {"text": "Synthesize, reflect, and polish the final structured answer", "completed": False},
                 {"text": "Track schema pass metrics and emit readable event logs", "completed": False},
             ],
         },
@@ -1968,6 +2323,10 @@ def run_research_pipeline(args: argparse.Namespace) -> None:
     evidence_cards = load_json(evidence_cards_path, {"evidence_cards": []})
     gap_log = load_json(gap_log_path, {"gaps": [], "contradictions": [], "next_queries": []})
     final_answer = load_json(final_answer_json_path, {}) or None
+    if brief:
+        brief, _ = hydrate_brief_defaults(brief, fallback_report_mode=manifest.get("report_mode_resolved", report_mode_resolved))
+    if final_answer:
+        final_answer, _ = ensure_answer_defaults(final_answer, brief)
     generate_workbench(run_dir, manifest, brief, data_registry, source_registry, evidence_cards, gap_log, final_answer)
 
     if args.resume and data_registry_path.exists() and load_json(data_registry_path, {}):
@@ -2031,6 +2390,12 @@ def run_research_pipeline(args: argparse.Namespace) -> None:
 
     if args.resume and brief_path.exists() and load_json(brief_path, {}) and not args.replan_on_feedback:
         brief = load_json(brief_path, {})
+        brief, brief_changed = hydrate_brief_defaults(
+            brief,
+            fallback_report_mode=manifest.get("report_mode_resolved", report_mode_resolved),
+        )
+        if brief_changed:
+            save_json(brief_path, brief)
         log(f"[PLAN] resume from {to_relative(brief_path)}")
     else:
         if args.resume and args.replan_on_feedback:
@@ -2055,8 +2420,19 @@ def run_research_pipeline(args: argparse.Namespace) -> None:
         )
         save_json(brief_path, brief)
         research_updated = True
+        brief, brief_changed = hydrate_brief_defaults(
+            brief,
+            fallback_report_mode=manifest.get("report_mode_resolved", report_mode_resolved),
+        )
+        if brief_changed:
+            save_json(brief_path, brief)
         manifest["primary_entity"] = brief.get("primary_entity", manifest.get("primary_entity", ""))
         manifest["report_mode_resolved"] = brief.get("report_mode", manifest.get("report_mode_resolved", report_mode_resolved))
+        manifest["analysis_depth_resolved"] = brief.get("analysis_depth", manifest.get("analysis_depth_resolved", ""))
+        manifest["allow_hypotheses_resolved"] = brief.get(
+            "allow_hypotheses",
+            manifest.get("allow_hypotheses_resolved", default_allow_hypotheses(manifest["report_mode_resolved"])),
+        )
         manifest["decision_or_discussion_need"] = brief.get(
             "decision_or_discussion_need",
             manifest.get("decision_or_discussion_need", ""),
@@ -2070,10 +2446,26 @@ def run_research_pipeline(args: argparse.Namespace) -> None:
             summary=first_non_empty_line(brief.get("objective_statement", "")) or "Research brief ready.",
             meta=with_stage_runtime_meta(
                 "planning",
-                {"questions": len(brief.get("key_questions", [])), "metrics": len(brief.get("metrics", []))},
+                {
+                    "questions": len(brief.get("key_questions", [])),
+                    "metrics": len(brief.get("metrics", [])),
+                    "analysis_depth": brief.get("analysis_depth", ""),
+                    "allow_hypotheses": brief.get("allow_hypotheses", False),
+                },
             ),
         )
         save_json(manifest_path, manifest)
+
+    manifest["report_mode_resolved"] = brief.get("report_mode", manifest.get("report_mode_resolved", report_mode_resolved))
+    manifest["analysis_depth_resolved"] = brief.get(
+        "analysis_depth",
+        manifest.get("analysis_depth_resolved", default_analysis_depth(manifest["report_mode_resolved"])),
+    )
+    manifest["allow_hypotheses_resolved"] = brief.get(
+        "allow_hypotheses",
+        manifest.get("allow_hypotheses_resolved", default_allow_hypotheses(manifest["report_mode_resolved"])),
+    )
+    save_json(manifest_path, manifest)
 
     update_manifest_stage(
         manifest_path,
@@ -2318,6 +2710,8 @@ def run_research_pipeline(args: argparse.Namespace) -> None:
         "<RUN_ID>": run_id,
         "<RUN_DIR>": to_relative(run_dir),
         "<BRIEF_PATH>": to_relative(brief_path),
+        "<NOTES_PATH>": to_relative(run_dir / "notes.txt"),
+        "<FEEDBACK_PATH>": to_relative(run_dir / "feedbacks.txt"),
         "<DATA_REGISTRY_PATH>": to_relative(data_registry_path),
         "<SOURCE_REGISTRY_PATH>": to_relative(source_registry_path),
         "<EVIDENCE_PATH>": to_relative(evidence_cards_path),
@@ -2328,19 +2722,24 @@ def run_research_pipeline(args: argparse.Namespace) -> None:
 
     stages = manifest.get("stages", {})
     synthesis_stage_status = normalize_space(str(stages.get("synthesis", {}).get("status", "")))
+    reflection_stage_status = normalize_space(str(stages.get("reflection", {}).get("status", "")))
     polish_stage_status = normalize_space(str(stages.get("polish", {}).get("status", "")))
+    reflection_layer_path = interim_dir / "reflection.json"
 
     can_resume_synthesis = (
         args.resume
         and not research_updated
         and synthesis_stage_status == "completed"
         and draft_answer_path.exists()
-        and bool(load_json(draft_answer_path, {}))
+        and is_synthesis_draft_valid(load_json(draft_answer_path, {}))
     )
     synthesis_ran = False
 
     if can_resume_synthesis:
         draft_answer = load_json(draft_answer_path, {})
+        draft_answer, draft_changed = ensure_answer_defaults(draft_answer, brief)
+        if draft_changed:
+            save_json(draft_answer_path, draft_answer)
         log(f"[FINAL] synthesis resume from {to_relative(draft_answer_path)}")
     else:
         update_manifest_stage(
@@ -2355,12 +2754,14 @@ def run_research_pipeline(args: argparse.Namespace) -> None:
         draft_answer = run_codex_stage(
             stage_key="synthesis",
             prompt=synthesis_prompt,
-            schema_path=schema_dir / "final_answer.schema.json",
+            schema_path=schema_dir / "final_answer_draft.schema.json",
             out_path=draft_answer_path,
             sandbox="read-only",
             live_search=False,
             stage_label="final synthesis",
         )
+        draft_answer, _ = ensure_answer_defaults(draft_answer, brief)
+        save_json(draft_answer_path, draft_answer)
         synthesis_ran = True
         update_manifest_stage(
             manifest_path,
@@ -2372,7 +2773,79 @@ def run_research_pipeline(args: argparse.Namespace) -> None:
             meta=with_stage_runtime_meta("synthesis", {"sections": len(draft_answer.get("sections", []))}),
         )
 
-    draft_mtime = draft_answer_path.stat().st_mtime if draft_answer_path.exists() else 0.0
+    reflection_enabled = brief.get("report_mode") == "internal_share"
+    polish_input_path = draft_answer_path
+
+    if reflection_enabled:
+        reflection_mapping = {
+            **synthesis_mapping,
+            "<DRAFT_ANSWER_PATH>": to_relative(draft_answer_path),
+        }
+        can_resume_reflection = (
+            args.resume
+            and not research_updated
+            and not synthesis_ran
+            and reflection_stage_status == "completed"
+            and reflection_layer_path.exists()
+            and is_reflection_payload_valid(load_json(reflection_layer_path, {}))
+        )
+        if can_resume_reflection:
+            reflection_obj = load_json(reflection_layer_path, {})
+            log(f"[FINAL] reflection resume from {to_relative(reflection_layer_path)}")
+        else:
+            update_manifest_stage(
+                manifest_path,
+                manifest,
+                "reflection",
+                status="running",
+                path=reflection_answer_path,
+                summary="Generating bounded internal discussion layer.",
+            )
+            reflection_prompt = render_template(prompts_dir / "research_reflection.md", reflection_mapping)
+            reflection_obj = run_codex_stage(
+                stage_key="reflection",
+                prompt=reflection_prompt,
+                schema_path=schema_dir / "reflection_output.schema.json",
+                out_path=reflection_layer_path,
+                sandbox="read-only",
+                live_search=False,
+                stage_label="final reflection",
+            )
+            save_json(reflection_layer_path, reflection_obj)
+
+        reflected_answer = merge_reflection_into_answer(draft_answer, reflection_obj)
+        reflected_answer, _ = ensure_answer_defaults(reflected_answer, brief)
+        save_json(reflection_answer_path, reflected_answer)
+        polish_input_path = reflection_answer_path
+        update_manifest_stage(
+            manifest_path,
+            manifest,
+            "reflection",
+            status="completed",
+            path=reflection_answer_path,
+            summary="Reflection layer merged into draft answer.",
+            meta=with_stage_runtime_meta(
+                "reflection",
+                {
+                    "working_hypotheses": len(reflected_answer.get("working_hypotheses", [])),
+                    "discussion_questions": len(reflected_answer.get("discussion_questions", [])),
+                    "watch_items": len(reflected_answer.get("watch_items", [])),
+                },
+            ),
+        )
+    else:
+        reflected_answer = draft_answer
+        save_json(reflection_answer_path, reflected_answer)
+        update_manifest_stage(
+            manifest_path,
+            manifest,
+            "reflection",
+            status="skipped",
+            path=reflection_answer_path,
+            summary="Reflection skipped for management brief.",
+        )
+
+    polish_source_mtime = polish_input_path.stat().st_mtime if polish_input_path.exists() else 0.0
     final_mtime = final_answer_json_path.stat().st_mtime if final_answer_json_path.exists() else 0.0
 
     can_resume_polish = (
@@ -2381,12 +2854,15 @@ def run_research_pipeline(args: argparse.Namespace) -> None:
         and not synthesis_ran
         and polish_stage_status == "completed"
         and final_answer_json_path.exists()
-        and final_mtime >= draft_mtime
-        and bool(load_json(final_answer_json_path, {}))
+        and final_mtime >= polish_source_mtime
+        and is_final_output_valid(load_json(final_answer_json_path, {}))
     )
 
     if can_resume_polish:
         final_answer = load_json(final_answer_json_path, {})
+        final_answer, final_changed = ensure_answer_defaults(final_answer, brief)
+        if final_changed:
+            save_json(final_answer_json_path, final_answer)
         log(f"[FINAL] polish resume from {to_relative(final_answer_json_path)}")
     else:
         update_manifest_stage(
@@ -2397,7 +2873,11 @@ def run_research_pipeline(args: argparse.Namespace) -> None:
             path=final_answer_json_path,
             summary="Polishing final research answer.",
         )
-        polish_prompt = render_template(prompts_dir / "research_polish.md", synthesis_mapping)
+        polish_mapping = {
+            **synthesis_mapping,
+            "<DRAFT_ANSWER_PATH>": to_relative(polish_input_path),
+        }
+        polish_prompt = render_template(prompts_dir / "research_polish.md", polish_mapping)
         final_answer = run_codex_stage(
             stage_key="polish",
             prompt=polish_prompt,
@@ -2407,6 +2887,7 @@ def run_research_pipeline(args: argparse.Namespace) -> None:
             live_search=False,
             stage_label="final polish",
         )
+        final_answer, _ = ensure_answer_defaults(final_answer, brief)
         save_json(final_answer_json_path, final_answer)
         final_answer_md_path.write_text(render_final_answer_markdown(final_answer), encoding="utf-8")
         update_manifest_stage(

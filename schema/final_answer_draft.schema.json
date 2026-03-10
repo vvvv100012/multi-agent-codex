@@ -173,7 +173,6 @@
           },
           "what_would_change_my_mind": {
             "type": "array",
-            "minItems": 1,
             "items": {
               "type": "string"
             }

@@ -30,6 +30,16 @@
         "internal_share"
       ]
     },
+    "analysis_depth": {
+      "type": "string",
+      "enum": [
+        "standard",
+        "deep"
+      ]
+    },
+    "allow_hypotheses": {
+      "type": "boolean"
+    },
     "deliverable": {
       "type": "string",
       "enum": [
@@ -140,6 +150,8 @@
     "research_angle",
     "audience",
     "report_mode",
+    "analysis_depth",
+    "allow_hypotheses",
     "deliverable",
     "objective_statement",
     "decision_or_discussion_need",

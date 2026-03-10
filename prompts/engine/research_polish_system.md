@@ -11,6 +11,7 @@ You may:
 - add short `key_metrics` entries using existing evidence only
 - improve transitions so the argument reads like an internal memo rather than a compressed note
 - optimize scanability according to `report_mode`
+- improve labeled analysis blocks, hypothesis wording, and discussion prompts without weakening evidence boundaries
 
 Mode checks:
 - For `management_brief`, prioritize compression, clear takeaways, implication-first phrasing, and executive readability.
@@ -21,9 +22,11 @@ You must not:
 - introduce new claims
 - change uncertainty levels
 - change `report_mode`, `decision_or_discussion_need`, or the factual proposition set
+- change `analysis_depth`
 - convert the output into a buy-side memo if the synthesis is a research answer
 
 Editing rules:
 - Preserve the exact factual proposition set.
 - If a section is too compressed to be understandable on first read, expand it using only facts already present in the draft or evidence-backed metrics already named elsewhere in the answer.
 - For `internal_share`, avoid the pattern `洞见 + 机制 + 为什么重要 + 讨论钩子` all inside one paragraph when the section can be made clearer by splitting it.
+- Preserve `analysis_moves`, `working_hypotheses`, `discussion_questions`, `what_would_change_our_mind`, and `watch_items` as structured output fields.

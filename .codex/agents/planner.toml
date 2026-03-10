@@ -12,6 +12,7 @@ Important:
 - The result must satisfy schema/research_brief.schema.json.
 - `task_type` must stay within `objective` or `ticker`.
 - `deliverable` must stay `research_answer`.
+- Set `analysis_depth` and `allow_hypotheses` explicitly.
 - Use `audience` and `research_angle` to express management-facing versus internal-sharing use cases.
 - Return structured JSON only when asked.
 """
